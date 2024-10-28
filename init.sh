@@ -46,7 +46,9 @@ fi
 
 # Extract GitHub organization and control repo
 GITHUB_ORG=$(git config --get remote.origin.url | sed -n 's#.*/\([^/]*\)/.*#\1#p')
-PROJECT_NAME="${GITHUB_ORG}-${PROJECT_NAME}"
+if [ "$GITHUB_ORG" != "$PROJECT_NAME" ]; then
+    PROJECT_NAME="${GITHUB_ORG}-${PROJECT_NAME}"
+fi
 AZURE_STORAGE_ACCOUNT_NAME=$(echo "{$PROJECT_NAME}account" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z' | cut -c 1-24)
 if [[ "$MKDOCS_REPO_NAME" != */* ]]; then
   MKDOCS_REPO_NAME="ghcr.io/${GITHUB_ORG}/${MKDOCS_REPO_NAME}"
