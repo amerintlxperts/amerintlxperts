@@ -1,0 +1,18 @@
+{
+  "REPOS": [
+    "cloud",
+    "ot",
+    "secops",
+    "sase",
+    "references"
+  ],
+  "THEME_REPO_NAME": "theme",
+  "LANDING_PAGE_REPO_NAME": "landing-page",
+  "DOCS_BUILDER_REPO_NAME": "docs-builder",
+  "INFRASTRUCTURE_REPO_NAME": "infrastructure",
+  "MANIFESTS_REPO_NAME": "manifests",
+  "MKDOCS_REPO_NAME": "mkdocs",
+  "DEPLOYED": "true",
+  "PROJECT_NAME": "amerintlxperts",
+  "LOCATION": "eastus"
+}
