@@ -330,7 +330,7 @@ update_HUB_NVA_CREDENTIALS() {
           fi
         fi
         if gh secret set HUB_NVA_USERNAME -b "${GITHUB_ORG}"  --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-          becho "Username set"
+          echo "Username set"
         else
           if [[ $attempt -lt $max_retries ]]; then
             echo "Warning: Failed to set GitHub secret HUB_NVA_USERNAME. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
@@ -496,7 +496,7 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
   cd "$TEMP_DIR" || exit 1
   if ! git clone "https://$github_token@github.com/${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME"; then
     echo "Error: Failed to clone repository $DOCS_BUILDER_REPO_NAME"
-    continue
+    exit 1
   fi
 
   cd "$DOCS_BUILDER_REPO_NAME" || exit 1
