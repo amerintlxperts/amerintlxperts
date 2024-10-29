@@ -15,7 +15,15 @@ Run the script fork-update.sh to create your local copies and to also sync with 
 1. The mkdocs base container is a dependency for building the documentation. The first task is to make sure the mkdocs workflow has successfully completed.
 
 ```
-gh workflow
+gh workflow run "Build and Push Docker Image" --repo ${GITHUB_ORG}/mkdocs
+```
+
+2. Provision the Azure Resources
+
+```
+gh secret set DEPLOYED -b "[true|false]" --repo ${GITHUB_ORG}/infrastructure
+gh workflow run infrastructure --repo ${GITHUB_ORG}/infrastructure
+```
 
 ## Contributing
 
@@ -24,4 +32,4 @@ After changes are commited and pushed to a local fork, create a pull request to 
 ```
 git remote add upstream https://github.com/amerintlxperts/amerintlxperts.git
 gh repo set-default amerintlxperts/amerintlxperts
-```
+
