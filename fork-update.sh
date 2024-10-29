@@ -97,6 +97,7 @@ for REPO in "${REPOS[@]}"; do
     # Check if the repository exists in the personal account
     if gh repo view "$USER/$REPO" --no-pager &> /dev/null; then
         if is_repo_fork "$USER" "$REPO"; then
+            echo "Repository $REPO is a fork. Syncing..."
             sync_repo "$USER" "$REPO" && enable_workflows "$USER" "$REPO"
         else
             echo "Repository $REPO exists but is not a fork of $ORG/$REPO. Skipping."
@@ -106,7 +107,8 @@ for REPO in "${REPOS[@]}"; do
         echo "Forking $ORG/$REPO to your personal GitHub account..."
         if gh repo fork "$ORG/$REPO" --clone=false; then
             echo "Successfully forked $ORG/$REPO."
-            enable_workflows "$USER" "$REPO"
+            # Sync immediately after forking
+            sync_repo "$USER" "$REPO" && enable_workflows "$USER" "$REPO"
         else
             echo "Failed to fork $ORG/$REPO. Please check for errors."
         fi
