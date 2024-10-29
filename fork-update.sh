@@ -45,9 +45,7 @@ is_repo_fork() {
 sync_repo() {
     local repo_owner="$1"
     local repo_name="$2"
-    echo "Syncing $repo_name with upstream..."
     if gh repo sync "$repo_owner/$repo_name" --force; then
-        echo "Successfully synced $repo_name."
         return 0
     else
         echo "Failed to sync $repo_name. Please check for errors."
@@ -55,17 +53,15 @@ sync_repo() {
     fi
 }
 
-# Function to enable workflows in repository
-enable_workflows() {
+# Function to check if workflows are enabled
+are_workflows_enabled() {
     local repo_owner="$1"
     local repo_name="$2"
-    if gh api -H "Accept: application/vnd.github.v3+json" -X PUT "/repos/$repo_owner/$repo_name/actions/permissions/workflow" -f enabled=true --silent; then
-        echo "Successfully enabled workflows for $repo_name."
-        return 0
+    local workflow_status=$(gh api -H "Accept: application/vnd.github.v3+json" "/repos/$repo_owner/$repo_name/actions/permissions/workflow" --jq '.enabled')
+    if [[ "$workflow_status" == "true" ]]; then
+        return 0 # Workflows are enabled
     else
-        local error=$(gh api -H "Accept: application/vnd.github.v3+json" -X PUT "/repos/$repo_owner/$repo_name/actions/permissions/workflow" -f enabled=true -F error=true 2>&1)
-        echo "Failed to enable workflows for $repo_name. Error details: $error" >&2
-        return 1
+        return 1 # Workflows are not enabled
     fi
 }
 
@@ -85,6 +81,7 @@ REPOS=(
   "landing-page"
   "mkdocs"
   "references"
+  "manifests"
 )
 
 # GitHub organization name
@@ -92,27 +89,30 @@ ORG="amerintlxperts"
 
 # Loop through each repository
 for REPO in "${REPOS[@]}"; do
-    echo "Checking $REPO..."
 
-    # Check if the repository exists in the personal account
     if gh repo view "$USER/$REPO" --no-pager &> /dev/null; then
         if is_repo_fork "$USER" "$REPO"; then
-            echo "Repository $REPO is a fork. Syncing..."
-            sync_repo "$USER" "$REPO" && enable_workflows "$USER" "$REPO"
+            sync_repo "$USER" "$REPO"
+            
+            # Check and enable workflows if not already enabled
+            if ! are_workflows_enabled "$USER" "$REPO"; then
+                echo "https://github.com/$ORG/$REPO/actions"
+            fi
         else
             echo "Repository $REPO exists but is not a fork of $ORG/$REPO. Skipping."
         fi
     else
         # If repo doesn't exist, fork it
-        echo "Forking $ORG/$REPO to your personal GitHub account..."
         if gh repo fork "$ORG/$REPO" --clone=false; then
-            echo "Successfully forked $ORG/$REPO."
             # Sync immediately after forking
-            sync_repo "$USER" "$REPO" && enable_workflows "$USER" "$REPO"
+            sync_repo "$USER" "$REPO"
+            
+            # Enable workflows if not already enabled after forking
+            if ! are_workflows_enabled "$USER" "$REPO"; then
+                echo "https://github.com/$ORG/$REPO/actions"
+            fi
         else
             echo "Failed to fork $ORG/$REPO. Please check for errors."
         fi
     fi
 done
-
-git pull
