@@ -115,4 +115,4 @@ for REPO in "${REPOS[@]}"; do
     fi
 done
 
-echo "All operations completed."
+git pull
