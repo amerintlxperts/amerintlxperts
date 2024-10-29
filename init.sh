@@ -496,6 +496,7 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
   clone_commands+="      - name: Link mkdocs.yml\n"
   clone_commands+="        shell: bash\n"
   clone_commands+="        run: |\n"
+  clone_commands+="          echo 'site_name: \"Hands on Labs\"' > \$TEMP_DIR/landing-page/mkdocs.yml\n"
   clone_commands+="          echo 'INHERIT: docs/theme/mkdocs.yml' > \$TEMP_DIR/landing-page/mkdocs.yml\n\n"
 
   local theme_secret_key_name="$(echo "${THEME_REPO_NAME}" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
