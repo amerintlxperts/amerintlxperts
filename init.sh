@@ -77,27 +77,6 @@ prompt_for_PAT(){
   read -rp "Enter GitHub PAT: " PAT
 }
 
-# Function to check if a GitHub repository exists
-repo_exists() {
-  local repo=$1
-  gh repo view "${GITHUB_ORG}/${repo}" &>/dev/null
-}
-
-check_and_create_repos() {
-  for repo in "${CONTENTREPOS[@]}"; do
-    if ! repo_exists "$repo"; then
-      read -rp "Create repository '$repo' in organization '$GITHUB_ORG'? (Y/n)" create_repo
-      create_repo=${create_repo:-Y}
-      if [[ "$create_repo" =~ ^[Yy]$ ]]; then
-        gh repo create "${GITHUB_ORG}/${repo}" --private
-      else
-        echo "Repository creation aborted. Exiting."
-        exit 1
-      fi
-    fi
-  done
-}
-
 copy_dispatch-workflow_to_content_repos() {
   # Use a trap to ensure that temporary directories are cleaned up safely
   TEMP_DIR=$(mktemp -d)
@@ -358,6 +337,7 @@ create_infrastructure_secrets() {
     "PROJECT_NAME:${PROJECT_NAME}" \
     "LOCATION:${LOCATION}" \
     "PAT:$PAT" \
+    "ORG:${GITHUB_ORG}" \
     "DOCS_BUILDER_REPO_NAME:$DOCS_BUILDER_REPO_NAME" \
     "MANIFESTS_SSH_PRIVATE_KEY:$(cat $HOME/.ssh/id_ed25519-manifests)" \
     "MANIFESTS_REPO_NAME:${GITHUB_ORG}/${MANIFESTS_REPO_NAME}" \
@@ -570,7 +550,6 @@ select_subscription
 create_azure_resources
 create_service_principal "$SUBSCRIPTION_ID"
 generate_ssh_keys
-check_and_create_repos
 handle_deploy_keys
 update_DOCS_HTPASSWD
 create_docs-builder_secrets
