@@ -521,7 +521,8 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
     clone_commands+="          git clone git@github.com:\${{ github.repository_owner }}/${repo}.git \$TEMP_DIR/src/${repo}/docs\n"
     clone_commands+="          echo '# Hands on Labs' > \$TEMP_DIR/src/${repo}/docs/index.md\n"
     clone_commands+="          cp -a \$TEMP_DIR/landing-page/docs/theme \$TEMP_DIR/src/${repo}/docs/\n"
-    clone_commands+="          echo 'INHERIT: docs/theme/mkdocs.yml' > \$TEMP_DIR/src/${repo}/mkdocs.yml\n"
+    clone_commands+="          echo 'site_name: Hands on Labs' > \$TEMP_DIR/src/${repo}/mkdocs.yml\n"
+    clone_commands+="          echo 'INHERIT: docs/theme/mkdocs.yml' >> \$TEMP_DIR/src/${repo}/mkdocs.yml\n"
     clone_commands+="          docker run --rm -v \$TEMP_DIR/src/${repo}:/docs \${{ secrets.MKDOCS_REPO_NAME }} build -d site/\n"
     clone_commands+="          mv \$TEMP_DIR/src/${repo}/site \$TEMP_DIR/build/site/${repo}\n\n"
   done
@@ -531,7 +532,7 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
   if [[ -n $(git status --porcelain) ]]; then
     git add $output_file 
     if git commit -m "Add or update docs-builder.yml workflow"; then
-      git switch -C docs-builder main && git push && gh pr create --title "Initializing repo" --body "Update docs builder" && gh pr merge -m --delete-branch || echo "Warning: Failed to push changes to $repo"
+      git switch -C docs-builder main && git push && gh repo set-default $GITHUB_ORG/docs-builder && gh pr create --title "Initializing repo" --body "Update docs builder" && gh pr merge -m --delete-branch || echo "Warning: Failed to push changes to $repo"
     else
       echo "Warning: No changes to commit for $repo"
     fi
@@ -559,3 +560,4 @@ update_HUB_NVA_CREDENTIALS
 create_infrastructure_secrets
 create_content-repo_secrets
 copy_dispatch-workflow_to_content_repos
+gh workflow run -R $GITHUB_ORG/mkdocs "Build and Push Docker Image"

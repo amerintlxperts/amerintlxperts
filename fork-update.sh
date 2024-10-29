@@ -104,7 +104,7 @@ for REPO in "${REPOS[@]}"; do
     else
         # If repo doesn't exist, fork it
         if gh repo fork "$ORG/$REPO" --clone=false; then
-            # Sync immediately after forking
+            sleep 10
             sync_repo "$USER" "$REPO"
             
             # Enable workflows if not already enabled after forking
