@@ -13,6 +13,7 @@ REPOS=(
   "secops"
   "theme"
   "docs-builder"
+  "landing-page"
   "mkdocs"
   "references"
 )
