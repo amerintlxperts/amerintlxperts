@@ -1,5 +1,17 @@
 #!/bin/bash
 
+# Function to check if the user is logged into GitHub
+check_github_auth() {
+    if ! gh auth status &>/dev/null; then
+        echo "You are not logged into GitHub. Running 'gh auth login' to refresh authentication."
+        gh auth login
+        if [[ $? -ne 0 ]]; then
+            echo "GitHub authentication failed. Exiting."
+            exit 1
+        fi
+    fi
+}
+
 # Function to get the GitHub username from 'gh auth status'
 get_github_username() {
     local output=$(gh auth status 2>/dev/null)
@@ -7,13 +19,14 @@ get_github_username() {
         echo "Error retrieving GitHub status."
         return 1
     fi
-    echo "$output" | grep -oP "(?<=account )[a-zA-Z0-9_\-]+"
+    echo "$output" | grep -oE "account [a-zA-Z0-9_\-]+" | awk '{print $2}'
 }
 
 # Function to prompt for GitHub username with a default value
 prompt_github_username() {
     local default_user=$(get_github_username)
-    read -e -p "Enter your personal GitHub account name [${default_user:-no user found}]: " -i "$default_user" USER
+    read -e -p "Enter your personal GitHub account name [${default_user:-no user found}]: " USER
+    USER="${USER:-$default_user}"
     if [[ -z "$USER" ]]; then
         echo "No GitHub username provided. Exiting."
         exit 1
@@ -25,7 +38,7 @@ is_repo_fork() {
     local repo_owner="$1"
     local repo_name="$2"
     local parent_name="$ORG/$repo_name"
-    
+
     local repo_info=$(gh repo view "$repo_owner/$repo_name" --json parent --no-pager 2>&1)
     local exit_status=$?
 
@@ -34,10 +47,8 @@ is_repo_fork() {
         return 1
     fi
 
-    echo "Repo info: $repo_info" >&2
-    
     local parent=$(echo "$repo_info" | jq -r '.parent | if type == "object" then (.owner.login + "/" + .name) else "" end')
-    
+
     [ "$parent" = "$parent_name" ]
 }
 
@@ -66,6 +77,7 @@ are_workflows_enabled() {
 }
 
 # Main execution
+check_github_auth
 prompt_github_username
 
 # List of repositories to be forked
@@ -93,7 +105,7 @@ for REPO in "${REPOS[@]}"; do
     if gh repo view "$USER/$REPO" --no-pager &> /dev/null; then
         if is_repo_fork "$USER" "$REPO"; then
             sync_repo "$USER" "$REPO"
-            
+
             # Check and enable workflows if not already enabled
             if ! are_workflows_enabled "$USER" "$REPO"; then
                 echo "https://github.com/$ORG/$REPO/actions"
@@ -104,9 +116,8 @@ for REPO in "${REPOS[@]}"; do
     else
         # If repo doesn't exist, fork it
         if gh repo fork "$ORG/$REPO" --clone=false; then
-            sleep 10
             sync_repo "$USER" "$REPO"
-            
+
             # Enable workflows if not already enabled after forking
             if ! are_workflows_enabled "$USER" "$REPO"; then
                 echo "https://github.com/$ORG/$REPO/actions"
