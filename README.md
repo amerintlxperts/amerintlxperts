@@ -30,6 +30,5 @@ gh workflow run infrastructure --repo ${GITHUB_ORG}/infrastructure
 After changes are commited and pushed to a local fork, create a pull request to the parent using the Github UI or the following cli commands.
 
 ```
-git remote add upstream https://github.com/amerintlxperts/amerintlxperts.git
 gh repo set-default amerintlxperts/amerintlxperts
 
