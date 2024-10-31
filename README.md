@@ -10,12 +10,18 @@ Run the script fork-update.sh to create your local copies and to also sync with 
 ./fork-update.sh
 ```
 
-## Deploy a Dev Environment
+## Deploy Environment
 
 1. The mkdocs base container is a dependency for building the documentation. The first task is to make sure the mkdocs workflow has successfully completed.
 
 ```
 gh workflow run "Build and Push Docker Image" --repo ${GITHUB_ORG}/mkdocs
+```
+
+## Get KubeConfig
+
+```
+z aks get-credentials --resource-group amerintlxperts --name amerintlxperts_k8s-cluster_eastus --overwrite-existing
 ```
 
 2. Provision the Azure Resources
