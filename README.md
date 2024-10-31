@@ -21,7 +21,7 @@ gh workflow run "Build and Push Docker Image" --repo ${GITHUB_ORG}/mkdocs
 ## Get KubeConfig
 
 ```
-z aks get-credentials --resource-group amerintlxperts --name amerintlxperts_k8s-cluster_eastus --overwrite-existing
+az aks get-credentials --resource-group amerintlxperts --name amerintlxperts_k8s-cluster_eastus --overwrite-existing
 ```
 
 2. Provision the Azure Resources
@@ -36,6 +36,5 @@ gh workflow run infrastructure --repo ${GITHUB_ORG}/infrastructure
 After changes are commited and pushed to a local fork, create a pull request to the parent using the Github UI or the following cli commands.
 
 ```
-git remote add upstream https://github.com/amerintlxperts/amerintlxperts.git
 gh repo set-default amerintlxperts/amerintlxperts
-
+```
