@@ -556,7 +556,7 @@ handle_deploy_keys
 update_DOCS_HTPASSWD
 create_docs-builder_secrets
 create_manifests_secrets
-copy_docs-builder-workflow_to_docs-builder_repo
+#copy_docs-builder-workflow_to_docs-builder_repo
 update_HUB_NVA_CREDENTIALS
 create_infrastructure_secrets
 create_content-repo_secrets
