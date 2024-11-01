@@ -250,7 +250,7 @@ update_LW_AGENT_TOKEN() {
     else
         read -srp "Enter value for Laceworks token: " new_LW_AGENT_TOKEN_value
         echo
-        if gh secret set LW_AGENT_TOKEN -b "$new_LW_AGENT_TOKEN_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NME; then
+        if gh secret set LW_AGENT_TOKEN -b "$new_LW_AGENT_TOKEN_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
           echo "Updated Laceworks Token"
         else
           if [[ $attempt -lt $max_retries ]]; then
