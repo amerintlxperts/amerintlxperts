@@ -227,6 +227,43 @@ create_service_principal() {
   fi
 }
 
+update_LW_AGENT_TOKEN() {
+    # Check if the secret HTPASSWD exists
+    if gh secret list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME | grep -q '^HTPASSWD\s'; then
+        read -rp "Change the Laceworks token ? (N/y): " response
+        response=${response:-N}
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            read -srp "Enter new value for Laceworks token: " new_LW_AGENT_TOKEN_value
+            echo
+            if gh secret set LW_AGENT_TOKEN -b "$new_LW_AGENT_TOKEN_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+              echo "Updated Laceworks token"
+            else
+              if [[ $attempt -lt $max_retries ]]; then
+                echo "Warning: Failed to set GitHub secret LW_AGENT_TOKEN. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+                sleep $retry_interval
+              else
+                echo "Error: Failed to set GitHub secret LW_AGENT_TOKEN after $max_retries attempts. Exiting."
+                exit 1
+              fi
+            fi
+        fi
+    else
+        read -srp "Enter value for Laceworks token: " new_LW_AGENT_TOKEN_value
+        echo
+        if gh secret set LW_AGENT_TOKEN -b "$new_LW_AGENT_TOKEN_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NME; then
+          echo "Updated Laceworks Token"
+        else
+          if [[ $attempt -lt $max_retries ]]; then
+            echo "Warning: Failed to set GitHub secret LW_AGENT_TOKEN. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+            sleep $retry_interval
+          else
+            echo "Error: Failed to set GitHub secret LW_AGENT_TOKEN after $max_retries attempts. Exiting."
+            exit 1
+          fi
+        fi
+    fi
+}
+
 update_DOCS_HTPASSWD() {
     # Check if the secret HTPASSWD exists
     if gh secret list --repo ${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME | grep -q '^HTPASSWD\s'; then
@@ -554,6 +591,7 @@ create_service_principal "$SUBSCRIPTION_ID"
 generate_ssh_keys
 handle_deploy_keys
 update_DOCS_HTPASSWD
+update_LW_AGENT_TOKEN
 create_docs-builder_secrets
 create_manifests_secrets
 #copy_docs-builder-workflow_to_docs-builder_repo
