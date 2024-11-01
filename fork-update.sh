@@ -56,7 +56,7 @@ is_repo_fork() {
 sync_repo() {
     local repo_owner="$1"
     local repo_name="$2"
-    if gh repo sync "$repo_owner/$repo_name --branch main" --force; then
+    if gh repo sync "$repo_owner/$repo_name" --branch main --force; then
         return 0
     else
         echo "Failed to sync $repo_name. Please check for errors."
