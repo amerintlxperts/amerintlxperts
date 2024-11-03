@@ -4,6 +4,7 @@ set -euo pipefail
 
 # Initialize INITJSON variable
 INITJSON="config.json"
+export GH_PAGER=""
 
 # Ensure the init.json file exists
 if [[ ! -f "$INITJSON" ]]; then
@@ -27,12 +28,25 @@ readarray -t CONTENTREPOS < <(jq -r '.REPOS[]' "$INITJSON")
 readarray -t CONTENTREPOSONLY < <(jq -r '.REPOS[]' "$INITJSON")
 CONTENTREPOS+=("$THEME_REPO_NAME")
 CONTENTREPOS+=("$LANDING_PAGE_REPO_NAME")
+
+readarray -t DEPLOYKEYSREPOS < <(jq -r '.REPOS[]' "$INITJSON")
+DEPLOYKEYSREPOS+=("$THEME_REPO_NAME")
+DEPLOYKEYSREPOS+=("$LANDING_PAGE_REPO_NAME")
+DEPLOYKEYSREPOS+=("$MANIFESTS_REPO_NAME")
+
+readarray -t PATREPOS < <(jq -r '.REPOS[]' "$INITJSON")
+PATREPOS+=("$THEME_REPO_NAME")
+PATREPOS+=("$LANDING_PAGE_REPO_NAME")
+PATREPOS+=("$INFRASTRUCTURE_REPO_NAME")
+PATREPOS+=("$MANIFESTS_REPO_NAME")
+
 readarray -t ALLREPOS < <(jq -r '.REPOS[]' "$INITJSON")
 ALLREPOS+=("$THEME_REPO_NAME")
 ALLREPOS+=("$LANDING_PAGE_REPO_NAME")
 ALLREPOS+=("$DOCS_BUILDER_REPO_NAME")
 ALLREPOS+=("$INFRASTRUCTURE_REPO_NAME")
 ALLREPOS+=("$MANIFESTS_REPO_NAME")
+ALLREPOS+=("$MKDOCS_REPO_NAME")
 
 current_dir=$(pwd)
 max_retries=3
@@ -56,7 +70,6 @@ fi
 if [[ "$MKDOCS_REPO_NAME" != *:* ]]; then
   MKDOCS_REPO_NAME="${MKDOCS_REPO_NAME}:latest"
 fi
-#CONTROL_REPO_NAME=$(git config --get remote.origin.url | sed -n 's#.*/\([^/]*\)\.git#\1#p')
 
 if [[ -z "$GITHUB_ORG" ]]; then
   echo "Could not detect GitHub organization. Exiting."
@@ -73,8 +86,74 @@ ensure_github_login() {
   fi
 }
 
-prompt_for_PAT(){
-  read -rp "Enter GitHub PAT: " PAT
+get_github_username() {
+    local output=$(gh auth status 2>/dev/null)
+    if [[ $? -ne 0 ]]; then
+        echo "Error retrieving GitHub status."
+        return 1
+    fi
+    echo "$output" | grep -oE "account [a-zA-Z0-9_\-]+" | awk '{print $2}'
+}
+
+prompt_github_username() {
+    local default_user=$(get_github_username)
+    read -e -p "Enter your personal GitHub account name [${default_user:-no user found}]: " USER
+    USER="${USER:-$default_user}"
+    if [[ -z "$USER" ]]; then
+        echo "No GitHub username provided. Exiting."
+        exit 1
+    fi
+}
+
+is_repo_fork() {
+  local repo_owner="$1"
+  local repo_name="$2"
+  local parent_owner_login="amerintlxperts/"
+  local repo_info=$(gh repo view "$repo_owner/$repo_name" --json parent )
+  local parent=$(echo "$repo_info" | jq -r '.parent | if type == "object" then (.owner.login + "/" + .name) else "" end')
+
+  if [[ -n "$parent" ]]; then
+    # repo_name is a fork
+    return 0
+  else
+    # repo_name is not a fork
+    return 1
+  fi
+}
+
+sync_repo() {
+    local repo_owner="$1"
+    local repo_name="$2"
+    if gh repo sync "$repo_owner/$repo_name" --branch main --force; then
+        return 0
+    else
+        echo "Failed to sync $repo_name. Please check for errors."
+        return 1
+    fi
+}
+
+sync_forks() {
+  local local_array=("${ALLREPOS[@]}")
+  UPSTREAM_ORG="amerintlxperts"
+
+  for REPO in "${local_array[@]}"; do
+    if gh repo view "${GITHUB_ORG}/$REPO" &> /dev/null; then
+        # repository exists
+        if is_repo_fork "$GITHUB_ORG" "$REPO"; then
+            # repository is a fork
+            sync_repo "$GITHUB_ORG" "$REPO"
+        else
+            echo "Repository $REPO exists but is not a fork of $UPSTREAM_ORG/$REPO. Skipping."
+        fi
+    else
+        # If repo doesn't exist, fork it
+        if gh repo fork "$UPSTREAM_ORG/$REPO" --clone=false; then
+            sync_repo "$GITHUB_ORG" "$REPO"
+        else
+            echo "Failed to fork $UPSTREAM_ORG/$REPO. Please check for errors."
+        fi
+    fi
+  done
 }
 
 copy_dispatch-workflow_to_content_repos() {
@@ -130,15 +209,11 @@ copy_dispatch-workflow_to_content_repos() {
 ensure_azure_login() {
   # Check if the account is currently active
   if ! az account show &>/dev/null; then
-    echo "No active Azure session found. Logging in..."
     az login --use-device-code
   else
     # Check if the token is still valid
     if ! az account get-access-token &>/dev/null; then
-      echo "Azure login has expired. Logging in again..."
       az login --use-device-code
-    else
-      echo "Azure login is active."
     fi
   fi
 }
@@ -170,15 +245,6 @@ select_subscription() {
     fi
     az account set --subscription "$SUBSCRIPTION_ID"
   fi
-}
-
-generate_ssh_keys() {
-  for repo in "${ALLREPOS[@]}"; do
-    local key_path="$HOME/.ssh/id_ed25519-$repo"
-    if [ ! -f "$key_path" ]; then
-      ssh-keygen -t ed25519 -N "" -f "$key_path" -q
-    fi
-  done
 }
 
 create_azure_resources() {
@@ -227,9 +293,50 @@ create_service_principal() {
   fi
 }
 
+update_PAT() {
+  local PAT
+  local new_PAT_value=""
+  local attempts
+  local max_attempts=3
+  for repo in "${PATREPOS[@]}"; do
+    if gh secret list --repo ${GITHUB_ORG}/$repo | grep -q '^PAT\s'; then
+      PAT="exists"
+    fi
+  done
+  if [[ -z "$PAT" ]]; then
+    read -srp "Enter value for GitHub PAT: " new_PAT_value
+    echo
+  else
+    read -rp "Change the GitHub PAT ? (N/y): " response
+    response=${response:-N}
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+      read -srp "Enter new value for GitHub PAT: " new_PAT_value
+      echo
+    else
+      new_PAT_value=""
+    fi 
+  fi
+  if [[ -n "$new_PAT_value" ]]; then
+    for repo in "${PATREPOS[@]}"; do
+      attempts=0
+      while (( attempts < max_attempts )); do
+        if gh secret set PAT -b "$new_PAT_value" --repo ${GITHUB_ORG}/$repo; then
+          break
+        else
+          ((attempts++))
+          if (( attempts < max_attempts )); then
+            echo "Retrying in $retry_interval seconds..."
+            sleep $retry_interval
+          fi
+        fi
+      done
+    done
+  fi
+}
+
 update_LW_AGENT_TOKEN() {
     # Check if the secret HTPASSWD exists
-    if gh secret list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME | grep -q '^HTPASSWD\s'; then
+    if gh secret list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME | grep -q '^LW_AGENT_TOKEN\s'; then
         read -rp "Change the Laceworks token ? (N/y): " response
         response=${response:-N}
         if [[ "$response" =~ ^[Yy]$ ]]; then
@@ -309,7 +416,7 @@ update_HUB_NVA_CREDENTIALS() {
             read -srp "Enter new password for the HUB NVA: " new_htpasswd_value
             echo
             if gh secret set HUB_NVA_PASSWORD -b "$new_htpasswd_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-              break
+              echo "Updated HUB_NVA_PASSWORD"
             else
               if [[ $attempt -lt $max_retries ]]; then
                 echo "Warning: Failed to set GitHub secret HUB_NVA_PASSWORD. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
@@ -320,7 +427,7 @@ update_HUB_NVA_CREDENTIALS() {
               fi
             fi
             if gh secret set HUB_NVA_USERNAME -b "${GITHUB_ORG}" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-              break
+              echo "Updated HUB_NVA_PASSWORD"
             else
               if [[ $attempt -lt $max_retries ]]; then
                 echo "Warning: Failed to set GitHub secret HUB_NVA_USERNAME. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
@@ -359,7 +466,6 @@ update_HUB_NVA_CREDENTIALS() {
     fi
 }
 
-# Function to create GitHub secrets
 create_infrastructure_secrets() {
 
   for secret in \
@@ -373,12 +479,9 @@ create_infrastructure_secrets() {
     "AZURE_CREDENTIALS:${AZURE_CREDENTIALS}" \
     "PROJECT_NAME:${PROJECT_NAME}" \
     "LOCATION:${LOCATION}" \
-    "PAT:$PAT" \
     "ORG:${GITHUB_ORG}" \
     "DOCS_BUILDER_REPO_NAME:$DOCS_BUILDER_REPO_NAME" \
-    "MANIFESTS_SSH_PRIVATE_KEY:$(cat $HOME/.ssh/id_ed25519-manifests)" \
-    "MANIFESTS_REPO_NAME:${GITHUB_ORG}/${MANIFESTS_REPO_NAME}" \
-    "DEPLOYED:$DEPLOYED"; do
+    "MANIFESTS_REPO_NAME:${GITHUB_ORG}/${MANIFESTS_REPO_NAME}"; do
     key="${secret%%:*}"
     value="${secret#*:}"
     for ((attempt=1; attempt<=max_retries; attempt++)); do
@@ -398,17 +501,14 @@ create_infrastructure_secrets() {
 }
 
 create_docs-builder_secrets() {
-  local secret_key
 
   for secret in \
     "DOCS_USERNAME:${DOCS_USERNAME}" \
     "AZURE_CREDENTIALS:${AZURE_CREDENTIALS}" \
     "ARM_CLIENT_ID:${clientId}" \
     "ARM_CLIENT_SECRET:${clientSecret}" \
-    "DEPLOYED:$DEPLOYED" \
     "MKDOCS_REPO_NAME:$MKDOCS_REPO_NAME" \
-    "MANIFESTS_REPO_NAME:$MANIFESTS_REPO_NAME" \
-    "PAT:$PAT"; do
+    "MANIFESTS_REPO_NAME:$MANIFESTS_REPO_NAME"; do
     key="${secret%%:*}"
     value="${secret#*:}"
     for ((attempt=1; attempt<=max_retries; attempt++)); do
@@ -425,47 +525,12 @@ create_docs-builder_secrets() {
       fi
     done
   done
-
-  for repo in "${CONTENTREPOS[@]}"; do
-    secret_key=$(cat $HOME/.ssh/id_ed25519-$repo)
-    normalized_repo=$(echo "$repo" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
-    for ((attempt=1; attempt<=max_retries; attempt++)); do
-      if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME; then
-        break
-      else
-        if [[ $attempt -lt $max_retries ]]; then
-          echo "Warning: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-          sleep $retry_interval
-        else
-          echo "Error: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY after $max_retries attempts. Exiting."
-          exit 1
-        fi
-      fi
-    done
-  done
-}
-
-create_manifests_secrets() {
-    for ((attempt=1; attempt<=max_retries; attempt++)); do
-      if gh secret set "PAT" -b "${PAT}" --repo ${GITHUB_ORG}/${MANIFESTS_REPO_NAME}; then
-        break
-      else
-        if [[ $attempt -lt $max_retries ]]; then
-          echo "Warning: Failed to set GitHub secret PAT. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-          sleep $retry_interval
-        else
-          echo "Error: Failed to set GitHub secret PAT after $max_retries attempts. Exiting."
-          exit 1
-        fi
-      fi
-    done
 }
 
 create_content-repo_secrets() {
   for repo in "${CONTENTREPOS[@]}"; do
     for secret in \
-      "DOCS_BUILDER_REPO_NAME:$DOCS_BUILDER_REPO_NAME" \
-      "PAT:$PAT"; do
+      "DOCS_BUILDER_REPO_NAME:$DOCS_BUILDER_REPO_NAME"; do
       key="${secret%%:*}"
       value="${secret#*:}"
       for ((attempt=1; attempt<=max_retries; attempt++)); do
@@ -485,13 +550,65 @@ create_content-repo_secrets() {
   done
 }
 
-handle_deploy_keys() {
-  for repo in "${ALLREPOS[@]}"; do
+update_DEPLOY-KEYS() {
+  local replace_keys
+  read -r -p "Do you want to replace the deploy-keys? (y/N): " replace_keys
+  replace_keys=${replace_keys:-n}
+
+  if [[ ! $replace_keys =~ ^[Yy]$ ]]; then
+    return
+  fi
+  local attempts
+  local max_attempts=3
+  for repo in "${DEPLOYKEYSREPOS[@]}"; do
+    local key_path="$HOME/.ssh/id_ed25519-$repo"
+    if [ ! -f "$key_path" ]; then
+      ssh-keygen -t ed25519 -N "" -f "$key_path" -q
+    fi
     deploy_key_id=$(gh repo deploy-key list --repo ${GITHUB_ORG}/$repo --json title,id | jq -r '.[] | select(.title == "DEPLOY-KEY") | .id')
     if [[ -n "$deploy_key_id" ]]; then
-      gh repo deploy-key delete --repo ${GITHUB_ORG}/$repo "$deploy_key_id"
+      attempts=0
+      while (( attempts < max_attempts )); do
+        if gh repo deploy-key delete --repo ${GITHUB_ORG}/$repo "$deploy_key_id"; then
+          break
+        else
+          ((attempts++))
+          if (( attempts < max_attempts )); then
+            echo "Retrying in $retry_interval seconds..."
+            sleep $retry_interval
+          fi
+        fi
+      done
     fi
-    gh repo deploy-key add $HOME/.ssh/id_ed25519-${repo}.pub --title 'DEPLOY-KEY' --repo ${GITHUB_ORG}/$repo
+    attempts=0
+    while (( attempts < max_attempts )); do
+      if gh repo deploy-key add $HOME/.ssh/id_ed25519-${repo}.pub --title 'DEPLOY-KEY' --repo ${GITHUB_ORG}/$repo; then
+        break
+      else
+        ((attempts++))
+        if (( attempts < max_attempts )); then
+          echo "Retrying in $retry_interval seconds..."
+          sleep $retry_interval
+        fi
+      fi
+    done
+
+    secret_key=$(cat $HOME/.ssh/id_ed25519-$repo)
+    normalized_repo=$(echo "$repo" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
+    for ((attempt=1; attempt<=max_retries; attempt++)); do
+      if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME; then
+        break
+      else
+        if [[ $attempt -lt $max_retries ]]; then
+          echo "Warning: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+          sleep $retry_interval
+        else
+          echo "Error: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY after $max_retries attempts. Exiting."
+          exit 1
+        fi
+      fi
+    done
+
   done
 }
 
@@ -581,22 +698,71 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
 
 }
 
+update_DEPLOYED() {
+  local current_value
+  local new_value=""
+  local attempts
+  local max_attempts=3
+  local var_name="DEPLOYED"
+
+  # Check if the DEPLOYED variable exists
+  current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
+
+  if [ -z "$current_value" ]; then
+    # Variable does not exist, prompt user to create it
+    read -p "Set initial DEPLOYED value ('true' or 'false') (default: true)? " new_value
+    new_value=${new_value:-true}
+  else
+    # Variable exists, display the current value and prompt user for change
+    if [[ "$current_value" == "true" ]]; then
+      opposite_value="false"
+    else
+      opposite_value="true"
+    fi
+    read -p "Change current value of \"DEPLOYED=$current_value\" to $opposite_value ? (N/y): " change_choice
+    change_choice=${change_choice:-N}
+    if [[ "$change_choice" =~ ^[Yy]$ ]]; then
+      # Toggle the value of DEPLOYED
+      if [ "$current_value" == "true" ]; then
+        new_value="false"
+      else
+        new_value="true"
+      fi
+    fi
+  fi
+  if [[ -n "$new_value" ]]; then
+    attempts=0
+    while (( attempts < max_attempts )); do
+      if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+        gh workflow run -R $GITHUB_ORG/$INFRASTRUCTURE_REPO_NAME "infrastructure"
+        break
+      else
+        ((attempts++))
+        if (( attempts < max_attempts )); then
+          echo "Retrying in $retry_interval seconds..."
+          sleep $retry_interval
+        fi
+      fi
+    done
+  fi
+}
+
 # Main execution flow
 ensure_azure_login
-ensure_github_login
-prompt_for_PAT
 select_subscription
 create_azure_resources
 create_service_principal "$SUBSCRIPTION_ID"
-generate_ssh_keys
-handle_deploy_keys
+ensure_github_login
+sync_forks
+update_DEPLOYED
+update_PAT
 update_DOCS_HTPASSWD
 update_LW_AGENT_TOKEN
-create_docs-builder_secrets
-create_manifests_secrets
-#copy_docs-builder-workflow_to_docs-builder_repo
 update_HUB_NVA_CREDENTIALS
+update_DEPLOY-KEYS
+create_docs-builder_secrets
+#copy_docs-builder-workflow_to_docs-builder_repo
 create_infrastructure_secrets
 create_content-repo_secrets
-copy_dispatch-workflow_to_content_repos
+#copy_dispatch-workflow_to_content_repos
 gh workflow run -R $GITHUB_ORG/mkdocs "Build and Push Docker Image"
