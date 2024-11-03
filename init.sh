@@ -77,14 +77,7 @@ if [[ -z "$GITHUB_ORG" ]]; then
 fi
 
 # Function to ensure the user is authenticated to GitHub
-update_GITHUB_AUTH_LOGIN() {
-  if ! gh auth status &>/dev/null; then
-    gh auth login || {
-      echo "GitHub login failed. Exiting."
-      exit 1
-    }
-  fi
-}
+
 
 get_github_username() {
     local output=$(gh auth status 2>/dev/null)
@@ -105,53 +98,46 @@ prompt_github_username() {
     fi
 }
 
-is_repo_fork() {
-  local repo_owner="$1"
-  local repo_name="$2"
-  local parent_owner_login="amerintlxperts/"
-  local repo_info=$(gh repo view "$repo_owner/$repo_name" --json parent )
-  local parent=$(echo "$repo_info" | jq -r '.parent | if type == "object" then (.owner.login + "/" + .name) else "" end')
-
-  if [[ -n "$parent" ]]; then
-    # repo_name is a fork
-    return 0
-  else
-    # repo_name is not a fork
-    return 1
+update_GITHUB_AUTH_LOGIN() {
+  if ! gh auth status &>/dev/null; then
+    gh auth login || {
+      echo "GitHub login failed. Exiting."
+      exit 1
+    }
   fi
 }
 
-sync_repo() {
-    local repo_owner="$1"
-    local repo_name="$2"
-    if gh repo sync "$repo_owner/$repo_name" --branch main --force; then
-        return 0
-    else
-        echo "Failed to sync $repo_name. Please check for errors."
-        return 1
-    fi
-}
-
 update_GITHUB_FORKS() {
-  local local_array=("${ALLREPOS[@]}")
-  UPSTREAM_ORG="amerintlxperts"
+  local local_array=(${ALLREPOS[@]})
+  local upstream_org="amerintlxperts"
+  local repo_owner="$GITHUB_ORG"
 
-  for REPO in "${local_array[@]}"; do
-    if gh repo view "${GITHUB_ORG}/$REPO" &> /dev/null; then
-        # repository exists
-        if is_repo_fork "$GITHUB_ORG" "$REPO"; then
-            # repository is a fork
-            sync_repo "$GITHUB_ORG" "$REPO"
-        else
-            echo "Repository $REPO exists but is not a fork of $UPSTREAM_ORG/$REPO. Skipping."
+  for repo_name in "${local_array[@]}"; do
+    if gh repo view "${repo_owner}/$repo_name" &> /dev/null; then
+      # Repository exists
+      local repo_info=$(gh repo view "$repo_owner/$repo_name" --json parent)
+      local parent=$(echo "$repo_info" | jq -r '.parent | if type == "object" then (.owner.login + "/" + .name) else "" end')
+
+      if [[ -n "$parent" ]]; then
+        # Repository is a fork, sync it
+        if ! gh repo sync "$repo_owner/$repo_name" --branch main --force; then
+          echo "Failed to sync $repo_name. Please check for errors."
         fi
+      else
+        echo "Repository $repo_name exists but is not a fork of $upstream_org/$repo_name. Skipping."
+      fi
     else
-        # If repo doesn't exist, fork it
-        if gh repo fork "$UPSTREAM_ORG/$REPO" --clone=false; then
-            sync_repo "$GITHUB_ORG" "$REPO"
+      # Repository does not exist, fork it
+      if gh repo fork "$upstream_org/$repo_name" --clone=false; then
+        echo "Successfully forked $upstream_org/$repo_name."
+        if gh repo sync "$repo_owner/$repo_name" --branch main --force; then
+          echo "Successfully synced $repo_name after forking."
         else
-            echo "Failed to fork $UPSTREAM_ORG/$REPO. Please check for errors."
+          echo "Failed to sync $repo_name after forking. Please check for errors."
         fi
+      else
+        echo "Failed to fork $upstream_org/$repo_name. Please check for errors."
+      fi
     fi
   done
 }
@@ -218,7 +204,6 @@ update_AZ_AUTH_LOGIN() {
   fi
 }
 
-# Function to select Azure subscription
 update_AZURE_SUBSCRIPTION_SELECTION() {
   local current_sub_name current_sub_id confirm subscription_name
 
@@ -264,7 +249,6 @@ update_AZURE_TFSTATE_RESOURCES() {
   fi
 }
 
-# Function to create or use an existing service principal and assign roles
 update_AZURE_CREDENTIALS() {
   local sp_output
 
@@ -290,6 +274,28 @@ update_AZURE_CREDENTIALS() {
       echo "Failed to assign the role. Exiting."
       exit 1
     }
+  fi
+}
+
+update_MKDOCS_CONTAINER() {
+  local repo="ghcr.io/${GITHUB_ORG}/mkdocs"
+  local tag="latest"
+
+  if docker manifest inspect "$repo:$tag" &>/dev/null; then
+    return 0
+  else
+    attempts=1
+    while [[ $attempts -le $max_attempts ]]; do
+      if gh workflow run -R $GITHUB_ORG/mkdocs "Build and Push Docker Image"; then
+        break
+      else
+        echo "Failed to trigger workflow."
+      fi
+      ((attempts++))
+      sleep 5
+    done
+    echo "Failure building mkdocs container"
+    exit 1
   fi
 }
 
@@ -334,190 +340,6 @@ update_PAT() {
   fi
 }
 
-update_LW_AGENT_TOKEN() {
-    # Check if the secret HTPASSWD exists
-    if gh secret list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME | grep -q '^LW_AGENT_TOKEN\s'; then
-        read -rp "Change the Laceworks token ? (N/y): " response
-        response=${response:-N}
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-            read -srp "Enter new value for Laceworks token: " new_LW_AGENT_TOKEN_value
-            echo
-            if gh secret set LW_AGENT_TOKEN -b "$new_LW_AGENT_TOKEN_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-              echo "Updated Laceworks token"
-            else
-              if [[ $attempt -lt $max_retries ]]; then
-                echo "Warning: Failed to set GitHub secret LW_AGENT_TOKEN. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-                sleep $retry_interval
-              else
-                echo "Error: Failed to set GitHub secret LW_AGENT_TOKEN after $max_retries attempts. Exiting."
-                exit 1
-              fi
-            fi
-        fi
-    else
-        read -srp "Enter value for Laceworks token: " new_LW_AGENT_TOKEN_value
-        echo
-        if gh secret set LW_AGENT_TOKEN -b "$new_LW_AGENT_TOKEN_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-          echo "Updated Laceworks Token"
-        else
-          if [[ $attempt -lt $max_retries ]]; then
-            echo "Warning: Failed to set GitHub secret LW_AGENT_TOKEN. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-            sleep $retry_interval
-          else
-            echo "Error: Failed to set GitHub secret LW_AGENT_TOKEN after $max_retries attempts. Exiting."
-            exit 1
-          fi
-        fi
-    fi
-}
-
-update_DOCS_HTPASSWD() {
-    # Check if the secret HTPASSWD exists
-    if gh secret list --repo ${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME | grep -q '^HTPASSWD\s'; then
-        read -rp "Change the Docs HTPASSWD? (N/y): " response
-        response=${response:-N}
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-            read -srp "Enter new value for Docs HTPASSWD: " new_htpasswd_value
-            echo
-            if gh secret set HTPASSWD -b "$new_htpasswd_value" --repo ${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME; then
-              gh workflow run -R $GITHUB_ORG/${DOCS_BUILDER_REPO_NAME} "docs-builder"
-            else
-              if [[ $attempt -lt $max_retries ]]; then
-                echo "Warning: Failed to set GitHub secret HTPASSWD. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-                sleep $retry_interval
-              else
-                echo "Error: Failed to set GitHub secret HTPASSWD after $max_retries attempts. Exiting."
-                exit 1
-              fi
-            fi
-        fi
-    else
-        read -srp "Enter value for Docs HTPASSWD: " new_htpasswd_value
-        echo
-        if gh secret set HTPASSWD -b "$new_htpasswd_value" --repo ${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME; then
-          echo "Updated Docs Password"
-        else
-          if [[ $attempt -lt $max_retries ]]; then
-            echo "Warning: Failed to set GitHub secret HTPASSWD. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-            sleep $retry_interval
-          else
-            echo "Error: Failed to set GitHub secret HTPASSWD after $max_retries attempts. Exiting."
-            exit 1
-          fi
-        fi
-    fi
-}
-
-update_HUB_NVA_CREDENTIALS() {
-
-  if gh secret list --repo "${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME" | grep -q '^HUB_NVA_PASSWORD\s' && gh secret list --repo "${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME" | grep -q '^HUB_NVA_USERNAME\s'; then
-    read -rp "Change the Hub NVA Password? (N/y): " response
-    response=${response:-N}
-    if [[ "$response" =~ ^[Yy]$ ]]; then
-      read -srp "Hub NVA Password: " new_htpasswd_value
-      echo
-    else
-      return 0
-    fi
-  else
-    read -srp "Hub NVA Password: " new_htpasswd_value
-    echo
-  fi
-
-  local attempt=1
-  while (( attempt <= max_retries )); do
-    if gh secret set "HUB_NVA_PASSWORD" -b "$new_htpasswd_value" --repo "${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME"; then
-      break
-    else
-      if (( attempt < max_retries )); then
-        echo "Warning: Failed to set GitHub secret HUB_NVA_PASSWORD. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-        sleep $retry_interval
-      else
-        echo "Error: Failed to set GitHub secret HUB_NVA_PASSWORD after $max_retries attempts. Exiting."
-        exit 1
-      fi
-    fi
-    ((attempt++))
-  done
-
-  local attempt=1
-  while (( attempt <= max_retries )); do
-    if gh secret set "HUB_NVA_USERNAME" -b "$GITHUB_ORG" --repo "${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME"; then
-      break
-    else
-      if (( attempt < max_retries )); then
-        echo "Warning: Failed to set GitHub secret HUB_NVA_USERNAME. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-        sleep $retry_interval
-      else
-        echo "Error: Failed to set GitHub secret HUB_NVA_USERNAME after $max_retries attempts. Exiting."
-        exit 1
-      fi
-    fi
-    ((attempt++))
-  done
-}
-
-update_INFRASTRUCTURE_SECRETS() {
-
-  for secret in \
-    "AZURE_STORAGE_ACCOUNT_NAME:${AZURE_STORAGE_ACCOUNT_NAME}" \
-    "TFSTATE_CONTAINER_NAME:${PROJECT_NAME}tfstate" \
-    "AZURE_TFSTATE_RESOURCE_GROUP_NAME:${PROJECT_NAME}-tfstate" \
-    "ARM_SUBSCRIPTION_ID:${subscriptionId}" \
-    "ARM_TENANT_ID:${tenantId}" \
-    "ARM_CLIENT_ID:${clientId}" \
-    "ARM_CLIENT_SECRET:${clientSecret}" \
-    "AZURE_CREDENTIALS:${AZURE_CREDENTIALS}" \
-    "PROJECT_NAME:${PROJECT_NAME}" \
-    "LOCATION:${LOCATION}" \
-    "ORG:${GITHUB_ORG}" \
-    "DOCS_BUILDER_REPO_NAME:$DOCS_BUILDER_REPO_NAME" \
-    "MANIFESTS_REPO_NAME:${GITHUB_ORG}/${MANIFESTS_REPO_NAME}"; do
-    key="${secret%%:*}"
-    value="${secret#*:}"
-    for ((attempt=1; attempt<=max_retries; attempt++)); do
-      if gh secret set "$key" -b "$value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-        break
-      else
-        if [[ $attempt -lt $max_retries ]]; then
-          echo "Warning: Failed to set GitHub secret $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-          sleep $retry_interval
-        else
-          echo "Error: Failed to set GitHub secret $key after $max_retries attempts. Exiting."
-          exit 1
-        fi
-      fi
-    done
-  done
-}
-
-update_DOCS-BUILDER_SECRETS() {
-
-  for secret in \
-    "DOCS_USERNAME:${DOCS_USERNAME}" \
-    "AZURE_CREDENTIALS:${AZURE_CREDENTIALS}" \
-    "ARM_CLIENT_ID:${clientId}" \
-    "ARM_CLIENT_SECRET:${clientSecret}" \
-    "MKDOCS_REPO_NAME:$MKDOCS_REPO_NAME" \
-    "MANIFESTS_REPO_NAME:$MANIFESTS_REPO_NAME"; do
-    key="${secret%%:*}"
-    value="${secret#*:}"
-    for ((attempt=1; attempt<=max_retries; attempt++)); do
-      if gh secret set "$key" -b "$value" --repo ${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME; then
-        break
-      else
-        if [[ $attempt -lt $max_retries ]]; then
-          echo "Warning: Failed to set GitHub secret $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-          sleep $retry_interval
-        else
-          echo "Error: Failed to set GitHub secret $key after $max_retries attempts. Exiting."
-          exit 1
-        fi
-      fi
-    done
-  done
-}
-
 update_CONTENT_REPOS_SECRETS() {
   for repo in "${CONTENTREPOS[@]}"; do
     for secret in \
@@ -547,7 +369,7 @@ update_DEPLOY-KEYS() {
   replace_keys=${replace_keys:-n}
 
   if [[ ! $replace_keys =~ ^[Yy]$ ]]; then
-    return
+    return 0
   fi
   local attempts
   local max_attempts=3
@@ -600,6 +422,86 @@ update_DEPLOY-KEYS() {
       fi
     done
 
+  done
+}
+
+update_DOCS-BUILDER_SECRETS() {
+  local max_retries=3
+  local retry_interval=5
+  local attempt=1
+
+  # Update secrets using a loop
+  for secret in \
+    "AZURE_CREDENTIALS:${AZURE_CREDENTIALS}" \
+    "ARM_CLIENT_ID:${clientId}" \
+    "ARM_CLIENT_SECRET:${clientSecret}" \
+    "MKDOCS_REPO_NAME:$MKDOCS_REPO_NAME" \
+    "MANIFESTS_REPO_NAME:$MANIFESTS_REPO_NAME"; do
+    
+    key="${secret%%:*}"
+    value="${secret#*:}"
+    
+    for ((attempt=1; attempt<=max_retries; attempt++)); do
+      if gh secret set "$key" -b "$value" --repo "${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME"; then
+        break
+      else
+        if [[ $attempt -lt $max_retries ]]; then
+          echo "Warning: Failed to set GitHub secret $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+          sleep $retry_interval
+        else
+          echo "Error: Failed to set GitHub secret $key after $max_retries attempts. Exiting."
+          exit 1
+        fi
+      fi
+    done
+  done
+
+  # Check if the secret HTPASSWD exists
+  if gh secret list --repo "${GITHUB_ORG}/${DOCS_BUILDER_REPO_NAME}" | grep -q '^HTPASSWD\s'; then
+    read -rp "Change the Docs HTPASSWD? (N/y): " response
+    response=${response:-N}
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+      read -srp "Enter new value for Docs HTPASSWD: " new_htpasswd_value
+      echo
+    else
+      return 0
+    fi
+  else
+    read -srp "Enter value for Docs HTPASSWD: " new_htpasswd_value
+    echo
+  fi
+
+  # Attempt to set the HTPASSWD secret with retries
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    if gh secret set HTPASSWD -b "$new_htpasswd_value" --repo "${GITHUB_ORG}/${DOCS_BUILDER_REPO_NAME}"; then
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to set GitHub secret HTPASSWD. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to set GitHub secret HTPASSWD after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
+  done
+
+  # Reset attempt counter for running the workflow
+  attempt=1
+
+  # Attempt to run the workflow up to three times
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    if gh workflow run -R "$GITHUB_ORG/${DOCS_BUILDER_REPO_NAME}" "docs-builder"; then
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to trigger workflow 'docs-builder'. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to trigger workflow 'docs-builder' after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
   done
 }
 
@@ -689,6 +591,126 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
 
 }
 
+update_LW_AGENT_TOKEN() {
+    # Check if the secret HTPASSWD exists
+    if gh secret list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME | grep -q '^LW_AGENT_TOKEN\s'; then
+        read -rp "Change the Laceworks token ? (N/y): " response
+        response=${response:-N}
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            read -srp "Enter new value for Laceworks token: " new_LW_AGENT_TOKEN_value
+            echo
+            if gh secret set LW_AGENT_TOKEN -b "$new_LW_AGENT_TOKEN_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+              echo "Updated Laceworks token"
+            else
+              if [[ $attempt -lt $max_retries ]]; then
+                echo "Warning: Failed to set GitHub secret LW_AGENT_TOKEN. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+                sleep $retry_interval
+              else
+                echo "Error: Failed to set GitHub secret LW_AGENT_TOKEN after $max_retries attempts. Exiting."
+                exit 1
+              fi
+            fi
+        fi
+    else
+        read -srp "Enter value for Laceworks token: " new_LW_AGENT_TOKEN_value
+        echo
+        if gh secret set LW_AGENT_TOKEN -b "$new_LW_AGENT_TOKEN_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+          echo "Updated Laceworks Token"
+        else
+          if [[ $attempt -lt $max_retries ]]; then
+            echo "Warning: Failed to set GitHub secret LW_AGENT_TOKEN. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+            sleep $retry_interval
+          else
+            echo "Error: Failed to set GitHub secret LW_AGENT_TOKEN after $max_retries attempts. Exiting."
+            exit 1
+          fi
+        fi
+    fi
+}
+
+update_HUB_NVA_CREDENTIALS() {
+
+  if gh secret list --repo "${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME" | grep -q '^HUB_NVA_PASSWORD\s' && gh secret list --repo "${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME" | grep -q '^HUB_NVA_USERNAME\s'; then
+    read -rp "Change the Hub NVA Password? (N/y): " response
+    response=${response:-N}
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+      read -srp "Hub NVA Password: " new_htpasswd_value
+      echo
+    else
+      return 0
+    fi
+  else
+    read -srp "Hub NVA Password: " new_htpasswd_value
+    echo
+  fi
+
+  local attempt=1
+  while (( attempt <= max_retries )); do
+    if gh secret set "HUB_NVA_PASSWORD" -b "$new_htpasswd_value" --repo "${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME"; then
+      break
+    else
+      if (( attempt < max_retries )); then
+        echo "Warning: Failed to set GitHub secret HUB_NVA_PASSWORD. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to set GitHub secret HUB_NVA_PASSWORD after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
+    ((attempt++))
+  done
+
+  local attempt=1
+  while (( attempt <= max_retries )); do
+    if gh secret set "HUB_NVA_USERNAME" -b "$GITHUB_ORG" --repo "${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME"; then
+      break
+    else
+      if (( attempt < max_retries )); then
+        echo "Warning: Failed to set GitHub secret HUB_NVA_USERNAME. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to set GitHub secret HUB_NVA_USERNAME after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
+    ((attempt++))
+  done
+}
+
+update_INFRASTRUCTURE_SECRETS() {
+
+  for secret in \
+    "AZURE_STORAGE_ACCOUNT_NAME:${AZURE_STORAGE_ACCOUNT_NAME}" \
+    "TFSTATE_CONTAINER_NAME:${PROJECT_NAME}tfstate" \
+    "AZURE_TFSTATE_RESOURCE_GROUP_NAME:${PROJECT_NAME}-tfstate" \
+    "ARM_SUBSCRIPTION_ID:${subscriptionId}" \
+    "ARM_TENANT_ID:${tenantId}" \
+    "ARM_CLIENT_ID:${clientId}" \
+    "ARM_CLIENT_SECRET:${clientSecret}" \
+    "AZURE_CREDENTIALS:${AZURE_CREDENTIALS}" \
+    "PROJECT_NAME:${PROJECT_NAME}" \
+    "LOCATION:${LOCATION}" \
+    "ORG:${GITHUB_ORG}" \
+    "DOCS_BUILDER_REPO_NAME:$DOCS_BUILDER_REPO_NAME" \
+    "MANIFESTS_REPO_NAME:${GITHUB_ORG}/${MANIFESTS_REPO_NAME}"; do
+    key="${secret%%:*}"
+    value="${secret#*:}"
+    for ((attempt=1; attempt<=max_retries; attempt++)); do
+      if gh secret set "$key" -b "$value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+        break
+      else
+        if [[ $attempt -lt $max_retries ]]; then
+          echo "Warning: Failed to set GitHub secret $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+          sleep $retry_interval
+        else
+          echo "Error: Failed to set GitHub secret $key after $max_retries attempts. Exiting."
+          exit 1
+        fi
+      fi
+    done
+  done
+}
+
 update_DEPLOYED() {
   local current_value
   local new_value=""
@@ -738,28 +760,6 @@ update_DEPLOYED() {
   fi
 }
 
-update_MKDOCS_CONTAINER() {
-  local repo="ghcr.io/${GITHUB_ORG}/mkdocs"
-  local tag="latest"
-
-  if docker manifest inspect "$repo:$tag" &>/dev/null; then
-    return
-  else
-    attempts=1
-    while [[ $attempts -le $max_attempts ]]; do
-      if gh workflow run -R $GITHUB_ORG/mkdocs "Build and Push Docker Image"; then
-        break
-      else
-        echo "Failed to trigger workflow."
-      fi
-      ((attempts++))
-      sleep 5
-    done
-    echo "Failure building mkdocs container"
-    exit 1
-  fi
-}
-
 update_AZ_AUTH_LOGIN
 update_AZURE_SUBSCRIPTION_SELECTION
 update_AZURE_TFSTATE_RESOURCES
@@ -768,14 +768,13 @@ update_GITHUB_AUTH_LOGIN
 update_GITHUB_FORKS
 update_MKDOCS_CONTAINER
 update_PAT
-update_DOCS_HTPASSWD
-update_LW_AGENT_TOKEN
-update_HUB_NVA_CREDENTIALS
+update_CONTENT_REPOS_SECRETS
 update_DEPLOY-KEYS
 update_DOCS-BUILDER_SECRETS
 #copy_docs-builder-workflow_to_docs-builder_repo
-update_CONTENT_REPOS_SECRETS
 #copy_dispatch-workflow_to_content_repos
+update_LW_AGENT_TOKEN
+update_HUB_NVA_CREDENTIALS
 update_INFRASTRUCTURE_SECRETS
 update_DEPLOYED
 
