@@ -543,7 +543,7 @@ update_CONTENT_REPOS_SECRETS() {
 
 update_DEPLOY-KEYS() {
   local replace_keys
-  read -r -p "Do you want to replace the deploy-keys? (y/N): " replace_keys
+  read -r -p "Do you want to replace the deploy-keys? (N/y): " replace_keys
   replace_keys=${replace_keys:-n}
 
   if [[ ! $replace_keys =~ ^[Yy]$ ]]; then
