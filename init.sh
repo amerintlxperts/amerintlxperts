@@ -22,8 +22,8 @@ THEME_REPO_NAME=$(jq -r '.THEME_REPO_NAME' "$INITJSON")
 LANDING_PAGE_REPO_NAME=$(jq -r '.LANDING_PAGE_REPO_NAME' "$INITJSON")
 DOCS_BUILDER_REPO_NAME=$(jq -r '.DOCS_BUILDER_REPO_NAME' "$INITJSON")
 INFRASTRUCTURE_REPO_NAME=$(jq -r '.INFRASTRUCTURE_REPO_NAME' "$INITJSON")
-INFRASTRUCTURE_MANIFESTS_REPO_NAME=$(jq -r '.INFRASTRUCTURE_MANIFESTS_REPO_NAME' "$INITJSON")
-APPLICATIONS_MANIFESTS_REPO_NAME=$(jq -r '.APPLICATIONS_MANIFESTS_REPO_NAME' "$INITJSON")
+MANIFESTS_INFRASTRUCTURE_REPO_NAME=$(jq -r '.MANIFESTS_INFRASTRUCTURE_REPO_NAME' "$INITJSON")
+MANIFESTS_APPLICATIONS_REPO_NAME=$(jq -r '.MANIFESTS_APPLICATIONS_REPO_NAME' "$INITJSON")
 MKDOCS_REPO_NAME=$(jq -r '.MKDOCS_REPO_NAME' "$INITJSON")
 
 readarray -t CONTENTREPOS < <(jq -r '.REPOS[]' "$INITJSON")
@@ -34,23 +34,23 @@ CONTENTREPOS+=("$LANDING_PAGE_REPO_NAME")
 readarray -t DEPLOYKEYSREPOS < <(jq -r '.REPOS[]' "$INITJSON")
 DEPLOYKEYSREPOS+=("$THEME_REPO_NAME")
 DEPLOYKEYSREPOS+=("$LANDING_PAGE_REPO_NAME")
-DEPLOYKEYSREPOS+=("$INFRASTRUCTURE_MANIFESTS_REPO_NAME")
-DEPLOYKEYSREPOS+=("$APPLICATIONS_MANIFESTS_REPO_NAME")
+DEPLOYKEYSREPOS+=("$MANIFESTS_INFRASTRUCTURE_REPO_NAME")
+DEPLOYKEYSREPOS+=("$MANIFESTS_APPLICATIONS_REPO_NAME")
 
 readarray -t PATREPOS < <(jq -r '.REPOS[]' "$INITJSON")
 PATREPOS+=("$THEME_REPO_NAME")
 PATREPOS+=("$LANDING_PAGE_REPO_NAME")
 PATREPOS+=("$INFRASTRUCTURE_REPO_NAME")
-PATREPOS+=("$INFRASTRUCTURE_MANIFESTS_REPO_NAME")
-PATREPOS+=("$APPLICATIONS_MANIFESTS_REPO_NAME")
+PATREPOS+=("$MANIFESTS_INFRASTRUCTURE_REPO_NAME")
+PATREPOS+=("$MANIFESTS_APPLICATIONS_REPO_NAME")
 
 readarray -t ALLREPOS < <(jq -r '.REPOS[]' "$INITJSON")
 ALLREPOS+=("$THEME_REPO_NAME")
 ALLREPOS+=("$LANDING_PAGE_REPO_NAME")
 ALLREPOS+=("$DOCS_BUILDER_REPO_NAME")
 ALLREPOS+=("$INFRASTRUCTURE_REPO_NAME")
-ALLREPOS+=("$INFRASTRUCTURE_MANIFESTS_REPO_NAME")
-ALLREPOS+=("$APPLICATIONS_MANIFESTS_REPO_NAME")
+ALLREPOS+=("$MANIFESTS_INFRASTRUCTURE_REPO_NAME")
+ALLREPOS+=("$MANIFESTS_APPLICATIONS_REPO_NAME")
 ALLREPOS+=("$MKDOCS_REPO_NAME")
 
 current_dir=$(pwd)
@@ -442,7 +442,7 @@ update_DOCS-BUILDER_SECRETS() {
     "ARM_CLIENT_ID:${clientId}" \
     "ARM_CLIENT_SECRET:${clientSecret}" \
     "MKDOCS_REPO_NAME:$MKDOCS_REPO_NAME" \
-    "APPLICATIONS_MANIFESTS_REPO_NAME:$APPLICATIONS_MANIFESTS_REPO_NAME" ; do
+    "MANIFESTS_APPLICATIONS_REPO_NAME:$MANIFESTS_APPLICATIONS_REPO_NAME" ; do
     
     key="${secret%%:*}"
     value="${secret#*:}"
@@ -796,8 +796,8 @@ update_INFRASTRUCTURE_SECRETS() {
     "LOCATION:${LOCATION}" \
     "ORG:${GITHUB_ORG}" \
     "DOCS_BUILDER_REPO_NAME:$DOCS_BUILDER_REPO_NAME" \
-    "APPLICATIONS_MANIFESTS_REPO_NAME:${GITHUB_ORG}/${APPLICATIONS_MANIFESTS_REPO_NAME}" \
-    "INFRASTRUCTURE_MANIFESTS_REPO_NAME:${GITHUB_ORG}/${INFRASTRUCTURE_MANIFESTS_REPO_NAME}"; do
+    "MANIFESTS_APPLICATIONS_REPO_NAME:${GITHUB_ORG}/${MANIFESTS_APPLICATIONS_REPO_NAME}" \
+    "MANIFESTS_INFRASTRUCTURE_REPO_NAME:${GITHUB_ORG}/${MANIFESTS_INFRASTRUCTURE_REPO_NAME}"; do
     key="${secret%%:*}"
     value="${secret#*:}"
     for ((attempt=1; attempt<=max_retries; attempt++)); do
@@ -815,8 +815,8 @@ update_INFRASTRUCTURE_SECRETS() {
     done
   done
 
-    secret_key=$(cat $HOME/.ssh/id_ed25519-${INFRASTRUCTURE_MANIFESTS_REPO_NAME})                                                                                                                           
-    normalized_repo=$(echo "${INFRASTRUCTURE_MANIFESTS_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')                                                                                               
+    secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_INFRASTRUCTURE_REPO_NAME})                                                                                                                           
+    normalized_repo=$(echo "${MANIFESTS_INFRASTRUCTURE_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')                                                                                               
     for ((attempt=1; attempt<=max_retries; attempt++)); do                                                                                                                  
       if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then                                               
         break                                                                                                                                                               
@@ -831,8 +831,8 @@ update_INFRASTRUCTURE_SECRETS() {
       fi                                                                                                                                                                    
     done                                                                                                                                                                    
           
-    secret_key=$(cat $HOME/.ssh/id_ed25519-${APPLICATIONS_MANIFESTS_REPO_NAME})                                                                                                                           
-    normalized_repo=$(echo "${APPLICATIONS_MANIFESTS_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')                                                                                               
+    secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_APPLICATIONS_REPO_NAME})                                                                                                                           
+    normalized_repo=$(echo "${MANIFESTS_APPLICATIONS_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')                                                                                               
     for ((attempt=1; attempt<=max_retries; attempt++)); do                                                                                                                  
       if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then                                               
         break                                                                                                                                                               
