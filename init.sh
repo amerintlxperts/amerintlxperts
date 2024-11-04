@@ -5,6 +5,7 @@ set -euo pipefail
 # Initialize INITJSON variable
 INITJSON="config.json"
 export GH_PAGER=""
+RUN_INFRASTRUCTURE="false"
 
 # Ensure the init.json file exists
 if [[ ! -f "$INITJSON" ]]; then
@@ -647,6 +648,7 @@ update_HUB_NVA_CREDENTIALS() {
   local attempt=1
   while (( attempt <= max_retries )); do
     if gh secret set "HUB_NVA_PASSWORD" -b "$new_htpasswd_value" --repo "${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME"; then
+      RUN_INFRASTRUCTURE="true"
       break
     else
       if (( attempt < max_retries )); then
@@ -675,6 +677,103 @@ update_HUB_NVA_CREDENTIALS() {
     fi
     ((attempt++))
   done
+}
+
+update_ENVIRONMENT_GRADE() {
+  local current_value
+  local new_value=""
+  local attempts
+  local max_attempts=3
+  local var_name="ENVIRONMENT_GRADE"
+
+  # Check if the DEPLOYED variable exists
+  current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
+
+  if [ -z "$current_value" ]; then
+    # Variable does not exist, prompt user to create it
+    read -p "Set initial ENVIRONMENT_GRADE value ('Production' or 'Development') (default: Production)? " new_value
+    new_value=${new_value:-true}
+  else
+    # Variable exists, display the current value and prompt user for change
+    if [[ "$current_value" == "Development" ]]; then
+      opposite_value="Production"
+    else
+      opposite_value="Development"
+    fi
+    read -p "Change current value of \"$var_name=$current_value\" to $opposite_value ? (N/y): " change_choice
+    change_choice=${change_choice:-N}
+    if [[ "$change_choice" =~ ^[Yy]$ ]]; then
+      # Toggle the value of DEPLOYED
+      if [ "$current_value" == "Development" ]; then
+        new_value="Production"
+      else
+        new_value="Development"
+      fi
+    fi
+  fi
+  if [[ -n "$new_value" ]]; then
+    attempts=0
+    while (( attempts < max_attempts )); do
+      if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+        RUN_INFRASTRUCTURE="true"
+        break
+      else
+        ((attempts++))
+        if (( attempts < max_attempts )); then
+          echo "Retrying in $retry_interval seconds..."
+          sleep $retry_interval
+        fi
+      fi
+    done
+  fi
+}
+
+update_GPU_NODE_POOL() {
+  local current_value
+  local new_value=""
+  local attempts
+  local max_attempts=3
+  local var_name="GPU_NODE_POOL"
+
+  # Check if the DEPLOYED variable exists
+  current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
+
+  if [ -z "$current_value" ]; then
+    # Variable does not exist, prompt user to create it
+    read -p "Set initial $var_name value ('true' or 'false') (default: false)? " new_value
+    new_value=${new_value:-true}
+  else
+    # Variable exists, display the current value and prompt user for change
+    if [[ "$current_value" == "true" ]]; then
+      opposite_value="false"
+    else
+      opposite_value="true"
+    fi
+    read -p "Change current value of \"$var_name=$current_value\" to $opposite_value ? (N/y): " change_choice
+    change_choice=${change_choice:-N}
+    if [[ "$change_choice" =~ ^[Yy]$ ]]; then
+      if [ "$current_value" == "true" ]; then
+        new_value="false"
+      else
+        new_value="true"
+      fi
+    fi
+  fi
+  if [[ -n "$new_value" ]]; then
+    attempts=0
+    while (( attempts < max_attempts )); do
+      if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+        RUN_INFRASTRUCTURE="true"
+        break
+      else
+        ((attempts++))
+        if (( attempts < max_attempts )); then
+          echo "Retrying in $retry_interval seconds..."
+          sleep $retry_interval
+        fi
+      fi
+    done
+  fi
 }
 
 update_INFRASTRUCTURE_SECRETS() {
@@ -747,7 +846,7 @@ update_DEPLOYED() {
     attempts=0
     while (( attempts < max_attempts )); do
       if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-        gh workflow run -R $GITHUB_ORG/$INFRASTRUCTURE_REPO_NAME "infrastructure"
+        RUN_INFRASTRUCTURE="true"
         break
       else
         ((attempts++))
@@ -775,6 +874,25 @@ update_DOCS-BUILDER_SECRETS
 #copy_dispatch-workflow_to_content_repos
 update_LW_AGENT_TOKEN
 update_HUB_NVA_CREDENTIALS
+update_ENVIRONMENT_GRADE
+update_GPU_NODE_POOL
 update_INFRASTRUCTURE_SECRETS
 update_DEPLOYED
+
+if [ "$RUN_INFRASTRUCTURE" = "true" ]; then
+  # Attempt to run the workflow up to three times
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    if gh workflow run -R $GITHUB_ORG/$INFRASTRUCTURE_REPO_NAME "infrastructure"; then
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to trigger workflow 'infrastructure'. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to trigger workflow 'infrastructure' after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
+  done
+fi
 
