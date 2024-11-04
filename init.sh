@@ -330,18 +330,27 @@ update_PAT() {
   fi
   if [[ -n "$new_PAT_value" ]]; then
     for repo in "${PATREPOS[@]}"; do
-      attempts=0
+      local attempts=0
+      local success=false
       while (( attempts < max_attempts )); do
-        if gh secret set PAT -b "$new_PAT_value" --repo ${GITHUB_ORG}/$repo; then
+        if gh secret set PAT -b "$new_PAT_value" --repo ${GITHUB_ORG}/$repo 2>/dev/null; then
+          echo "Successfully updated PAT for repository: $repo"
+          success=true
           break
         else
           ((attempts++))
           if (( attempts < max_attempts )); then
-            echo "Retrying in $retry_interval seconds..."
+            echo "Attempt $attempts failed. Retrying in $retry_interval seconds..."
             sleep $retry_interval
+          else
+            echo "Failed to update PAT for repository: $repo after $max_attempts attempts."
           fi
         fi
       done
+      # If all attempts failed, this might help with script continuation
+      if ! $success; then
+        echo "All attempts to update PAT for $repo failed."
+      fi
     done
   fi
 }
