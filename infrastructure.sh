@@ -727,104 +727,56 @@ update_HUB_NVA_CREDENTIALS() {
   done
 }
 
-update_ENVIRONMENT_GRADE() {
+update_INFRASTRUCTURE_VARIABLES() {
   local current_value
   local new_value=""
   local attempts
   local max_attempts=3
-  local var_name="ENVIRONMENT_GRADE"
+  declare -a app_list=("DEPLOYED" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL" "PRODUCTION_ENVIRONMENT")
 
-  # Check if the DEPLOYED variable exists
-  current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
+  for var_name in "${app_list[@]}"; do
+    current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
 
-  if [ -z "$current_value" ]; then
-    # Variable does not exist, prompt user to create it
-    read -p "Set initial ENVIRONMENT_GRADE value ('Production' or 'Development') (default: Production)? " new_value
-    new_value=${new_value:-true}
-  else
-    # Variable exists, display the current value and prompt user for change
-    if [[ "$current_value" == "Development" ]]; then
-      opposite_value="Production"
+    if [ -z "$current_value" ]; then
+      # Variable does not exist, prompt user to create it
+      read -p "Set initial $var_name value ('true' or 'false') (default: false)? " new_value
+      new_value=${new_value:-false}
     else
-      opposite_value="Development"
-    fi
-    read -p "Change current value of \"$var_name=$current_value\" to $opposite_value ? (N/y): " change_choice
-    change_choice=${change_choice:-N}
-    if [[ "$change_choice" =~ ^[Yy]$ ]]; then
-      # Toggle the value of DEPLOYED
-      if [ "$current_value" == "Development" ]; then
-        new_value="Production"
+      # Variable exists, display the current value and prompt user for change
+      if [[ "$current_value" == "true" ]]; then
+        opposite_value="false"
       else
-        new_value="Development"
+        opposite_value="true"
+      fi
+      read -p "Change current value of \"$var_name=$current_value\" to $opposite_value ? (N/y): " change_choice
+      change_choice=${change_choice:-N}
+      if [[ "$change_choice" =~ ^[Yy]$ ]]; then
+        new_value=$opposite_value
       fi
     fi
-  fi
-  if [[ -n "$new_value" ]]; then
-    attempts=0
-    while (( attempts < max_attempts )); do
-      if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-        RUN_INFRASTRUCTURE="true"
-        break
-      else
-        ((attempts++))
-        if (( attempts < max_attempts )); then
-          echo "Retrying in $retry_interval seconds..."
-          sleep $retry_interval
+
+    # If there's a new value to be set, attempt to update the variable
+    if [[ -n "$new_value" ]]; then
+      attempts=0
+      while (( attempts < max_attempts )); do
+        if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+          RUN_INFRASTRUCTURE="true"
+          break
+        else
+          ((attempts++))
+          if (( attempts < max_attempts )); then
+            echo "Retrying in $retry_interval seconds..."
+            sleep $retry_interval
+          fi
         fi
-      fi
-    done
-  fi
-}
-
-update_GPU_NODE_POOL() {
-  local current_value
-  local new_value=""
-  local attempts
-  local max_attempts=3
-  local var_name="GPU_NODE_POOL"
-
-  # Check if the DEPLOYED variable exists
-  current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
-
-  if [ -z "$current_value" ]; then
-    # Variable does not exist, prompt user to create it
-    read -p "Set initial $var_name value ('true' or 'false') (default: false)? " new_value
-    new_value=${new_value:-true}
-  else
-    # Variable exists, display the current value and prompt user for change
-    if [[ "$current_value" == "true" ]]; then
-      opposite_value="false"
-    else
-      opposite_value="true"
+      done
     fi
-    read -p "Change current value of \"$var_name=$current_value\" to $opposite_value ? (N/y): " change_choice
-    change_choice=${change_choice:-N}
-    if [[ "$change_choice" =~ ^[Yy]$ ]]; then
-      if [ "$current_value" == "true" ]; then
-        new_value="false"
-      else
-        new_value="true"
-      fi
-    fi
-  fi
-  if [[ -n "$new_value" ]]; then
-    attempts=0
-    while (( attempts < max_attempts )); do
-      if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-        RUN_INFRASTRUCTURE="true"
-        break
-      else
-        ((attempts++))
-        if (( attempts < max_attempts )); then
-          echo "Retrying in $retry_interval seconds..."
-          sleep $retry_interval
-        fi
-      fi
-    done
-  fi
+  done
 }
 
 update_INFRASTRUCTURE_SECRETS() {
+  update_LW_AGENT_TOKEN
+  update_HUB_NVA_CREDENTIALS
 
   for secret in \
     "AZURE_STORAGE_ACCOUNT_NAME:${AZURE_STORAGE_ACCOUNT_NAME}" \
@@ -892,55 +844,6 @@ update_INFRASTRUCTURE_SECRETS() {
 
 }
 
-update_DEPLOYED() {
-  local current_value
-  local new_value=""
-  local attempts
-  local max_attempts=3
-  local var_name="DEPLOYED"
-
-  # Check if the DEPLOYED variable exists
-  current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
-
-  if [ -z "$current_value" ]; then
-    # Variable does not exist, prompt user to create it
-    read -p "Set initial DEPLOYED value ('true' or 'false') (default: true)? " new_value
-    new_value=${new_value:-true}
-  else
-    # Variable exists, display the current value and prompt user for change
-    if [[ "$current_value" == "true" ]]; then
-      opposite_value="false"
-    else
-      opposite_value="true"
-    fi
-    read -p "Change current value of \"DEPLOYED=$current_value\" to $opposite_value ? (N/y): " change_choice
-    change_choice=${change_choice:-N}
-    if [[ "$change_choice" =~ ^[Yy]$ ]]; then
-      # Toggle the value of DEPLOYED
-      if [ "$current_value" == "true" ]; then
-        new_value="false"
-      else
-        new_value="true"
-      fi
-    fi
-  fi
-  if [[ -n "$new_value" ]]; then
-    attempts=0
-    while (( attempts < max_attempts )); do
-      if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-        RUN_INFRASTRUCTURE="true"
-        break
-      else
-        ((attempts++))
-        if (( attempts < max_attempts )); then
-          echo "Retrying in $retry_interval seconds..."
-          sleep $retry_interval
-        fi
-      fi
-    done
-  fi
-}
-
 show_help() {
     echo "Usage: $0 [--initialize | --destroy | --create | --help]"
     echo
@@ -966,12 +869,8 @@ initialize() {
     update_DOCS-BUILDER_SECRETS
     #copy_docs-builder-workflow_to_docs-builder_repo
     #copy_dispatch-workflow_to_content_repos
-    update_LW_AGENT_TOKEN
-    update_HUB_NVA_CREDENTIALS
-    update_ENVIRONMENT_GRADE
-    update_GPU_NODE_POOL
+    update_INFRASTRUCTURE_VARIABLES
     update_INFRASTRUCTURE_SECRETS
-    update_DEPLOYED
     if [ "$RUN_INFRASTRUCTURE" = "true" ]; then
     # Attempt to run the workflow up to three times
     for ((attempt=1; attempt<=max_retries; attempt++)); do
