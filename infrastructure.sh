@@ -953,6 +953,10 @@ show_help() {
 
 # Function for initializing
 initialize() {
+    update_AZ_AUTH_LOGIN
+    update_AZURE_SUBSCRIPTION_SELECTION
+    update_AZURE_TFSTATE_RESOURCES
+    update_AZURE_CREDENTIALS "$SUBSCRIPTION_ID"
     update_GITHUB_AUTH_LOGIN
     update_GITHUB_FORKS
     update_MKDOCS_CONTAINER
