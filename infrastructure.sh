@@ -481,9 +481,6 @@ update_DOCS-BUILDER_SECRETS() {
 
   # Update secrets using a loop
   for secret in \
-    "AZURE_CREDENTIALS:${AZURE_CREDENTIALS}" \
-    "ARM_CLIENT_ID:${clientId}" \
-    "ARM_CLIENT_SECRET:${clientSecret}" \
     "MKDOCS_REPO_NAME:$MKDOCS_REPO_NAME" \
     "MANIFESTS_APPLICATIONS_REPO_NAME:$MANIFESTS_APPLICATIONS_REPO_NAME" ; do
     
@@ -774,10 +771,7 @@ update_INFRASTRUCTURE_VARIABLES() {
   done
 }
 
-update_INFRASTRUCTURE_SECRETS() {
-  update_LW_AGENT_TOKEN
-  update_HUB_NVA_CREDENTIALS
-
+update_AZURE_SECRETS() {
   for secret in \
     "AZURE_STORAGE_ACCOUNT_NAME:${AZURE_STORAGE_ACCOUNT_NAME}" \
     "TFSTATE_CONTAINER_NAME:${PROJECT_NAME}tfstate" \
@@ -786,7 +780,53 @@ update_INFRASTRUCTURE_SECRETS() {
     "ARM_TENANT_ID:${tenantId}" \
     "ARM_CLIENT_ID:${clientId}" \
     "ARM_CLIENT_SECRET:${clientSecret}" \
+    "AZURE_CREDENTIALS:${AZURE_CREDENTIALS}"; do
+    key="${secret%%:*}"
+    value="${secret#*:}"
+    for ((attempt=1; attempt<=max_retries; attempt++)); do
+      if gh secret set "$key" -b "$value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+        RUN_INFRASTRUCTURE="true"
+        break
+      else
+        if [[ $attempt -lt $max_retries ]]; then
+          echo "Warning: Failed to set GitHub secret $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+          sleep $retry_interval
+        else
+          echo "Error: Failed to set GitHub secret $key after $max_retries attempts. Exiting."
+          exit 1
+        fi
+      fi
+    done
+  done
+
+  for secret in \
     "AZURE_CREDENTIALS:${AZURE_CREDENTIALS}" \
+    "ARM_CLIENT_ID:${clientId}" \
+    "ARM_CLIENT_SECRET:${clientSecret}" ; do
+    
+    key="${secret%%:*}"
+    value="${secret#*:}"
+    
+    for ((attempt=1; attempt<=max_retries; attempt++)); do
+      if gh secret set "$key" -b "$value" --repo "${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME"; then
+        RUN_INFRASTRUCTURE="true"
+        break
+      else
+        if [[ $attempt -lt $max_retries ]]; then
+          echo "Warning: Failed to set GitHub secret $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+          sleep $retry_interval
+        else
+          echo "Error: Failed to set GitHub secret $key after $max_retries attempts. Exiting."
+          exit 1
+        fi
+      fi
+    done
+  done
+}
+
+update_INFRASTRUCTURE_SECRETS() {
+
+  for secret in \
     "PROJECT_NAME:${PROJECT_NAME}" \
     "LOCATION:${LOCATION}" \
     "ORG:${GITHUB_ORG}" \
@@ -856,37 +896,24 @@ show_help() {
 
 # Function for initializing
 initialize() {
-    update_AZ_AUTH_LOGIN
-    update_AZURE_SUBSCRIPTION_SELECTION
-    update_AZURE_TFSTATE_RESOURCES
-    update_AZURE_CREDENTIALS "$SUBSCRIPTION_ID"
-    update_GITHUB_AUTH_LOGIN
-    update_GITHUB_FORKS
-    update_MKDOCS_CONTAINER
-    update_PAT
-    update_CONTENT_REPOS_SECRETS
-    update_DEPLOY-KEYS
-    update_DOCS-BUILDER_SECRETS
-    #copy_docs-builder-workflow_to_docs-builder_repo
-    #copy_dispatch-workflow_to_content_repos
-    update_INFRASTRUCTURE_VARIABLES
-    update_INFRASTRUCTURE_SECRETS
-    if [ "$RUN_INFRASTRUCTURE" = "true" ]; then
-    # Attempt to run the workflow up to three times
-    for ((attempt=1; attempt<=max_retries; attempt++)); do
-      if gh workflow run -R $GITHUB_ORG/$INFRASTRUCTURE_REPO_NAME "infrastructure"; then
-        break
-      else
-        if [[ $attempt -lt $max_retries ]]; then
-          echo "Warning: Failed to trigger workflow 'infrastructure'. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-          sleep $retry_interval
-        else
-          echo "Error: Failed to trigger workflow 'infrastructure' after $max_retries attempts. Exiting."
-          exit 1
-        fi
-      fi
-    done
-  fi
+  update_GITHUB_AUTH_LOGIN
+  update_GITHUB_FORKS
+  update_AZ_AUTH_LOGIN
+  update_AZURE_SUBSCRIPTION_SELECTION
+  update_AZURE_TFSTATE_RESOURCES
+  update_AZURE_CREDENTIALS "$SUBSCRIPTION_ID"
+  update_AZURE_SECRETS
+  update_MKDOCS_CONTAINER
+  update_PAT
+  update_CONTENT_REPOS_SECRETS
+  update_DEPLOY-KEYS
+  update_DOCS-BUILDER_SECRETS
+  #copy_docs-builder-workflow_to_docs-builder_repo
+  #copy_dispatch-workflow_to_content_repos
+  update_INFRASTRUCTURE_VARIABLES
+  update_LW_AGENT_TOKEN
+  update_HUB_NVA_CREDENTIALS
+  update_INFRASTRUCTURE_SECRETS
 }
 
 # Function for destroying
@@ -901,6 +928,7 @@ create() {
     update_AZURE_SUBSCRIPTION_SELECTION
     update_AZURE_TFSTATE_RESOURCES
     update_AZURE_CREDENTIALS "$SUBSCRIPTION_ID"
+    update_AZURE_SECRETS
 }
 
 # Check the number of arguments
@@ -936,3 +964,19 @@ case "$action" in
         exit 1
         ;;
 esac
+
+if [ "$RUN_INFRASTRUCTURE" = "true" ]; then
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    if gh workflow run -R $GITHUB_ORG/$INFRASTRUCTURE_REPO_NAME "infrastructure"; then
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to trigger workflow 'infrastructure'. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to trigger workflow 'infrastructure' after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
+  done
+fi
