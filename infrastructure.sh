@@ -283,6 +283,40 @@ update_AZURE_CREDENTIALS() {
   fi
 }
 
+delete_AZURE_TFSTATE_RESOURCES() {
+  # Delete storage container if it exists
+  if az storage container show -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" &>/dev/null; then
+    az storage container delete -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}"
+  fi
+
+  # Delete storage account if it exists
+  if az storage account show -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" &>/dev/null; then
+    az storage account delete -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" --yes
+  fi
+
+  # Delete resource group if it exists
+  if az group show -n "${PROJECT_NAME}-tfstate" &>/dev/null; then
+    az group delete -n "${PROJECT_NAME}-tfstate" --yes --no-wait
+  fi
+}
+
+delete_AZURE_CREDENTIALS() {
+  # Check if service principal exists
+  local sp_exists
+  sp_exists=$(az ad sp show --id "http://${PROJECT_NAME}" --query "appId" -o tsv 2>/dev/null)
+
+  if [[ -n "$sp_exists" ]]; then
+    # Remove role assignment
+    az role assignment delete --assignee "$sp_exists" --role "User Access Administrator" --scope "/subscriptions/$1"
+
+    # Delete service principal
+    az ad sp delete --id "http://${PROJECT_NAME}"
+  else
+    echo "Service principal '${PROJECT_NAME}' does not exist."
+  fi
+}
+
+
 update_MKDOCS_CONTAINER() {
   local repo="ghcr.io/${GITHUB_ORG}/mkdocs"
   local tag="latest"
@@ -907,40 +941,95 @@ update_DEPLOYED() {
   fi
 }
 
-update_AZ_AUTH_LOGIN
-update_AZURE_SUBSCRIPTION_SELECTION
-update_AZURE_TFSTATE_RESOURCES
-update_AZURE_CREDENTIALS "$SUBSCRIPTION_ID"
-update_GITHUB_AUTH_LOGIN
-update_GITHUB_FORKS
-update_MKDOCS_CONTAINER
-update_PAT
-update_CONTENT_REPOS_SECRETS
-update_DEPLOY-KEYS
-update_DOCS-BUILDER_SECRETS
-#copy_docs-builder-workflow_to_docs-builder_repo
-#copy_dispatch-workflow_to_content_repos
-update_LW_AGENT_TOKEN
-update_HUB_NVA_CREDENTIALS
-update_ENVIRONMENT_GRADE
-update_GPU_NODE_POOL
-update_INFRASTRUCTURE_SECRETS
-update_DEPLOYED
+show_help() {
+    echo "Usage: $0 [--initialize | --destroy | --create | --help]"
+    echo
+    echo "Options:"
+    echo "  --initialize    Default option. Initializes GitHub secrets and variables"
+    echo "  --destroy       Destroys the environment."
+    echo "  --create        Creates resources."
+    echo "  --help          Displays this help message."
+}
 
-if [ "$RUN_INFRASTRUCTURE" = "true" ]; then
-  # Attempt to run the workflow up to three times
-  for ((attempt=1; attempt<=max_retries; attempt++)); do
-    if gh workflow run -R $GITHUB_ORG/$INFRASTRUCTURE_REPO_NAME "infrastructure"; then
-      break
-    else
-      if [[ $attempt -lt $max_retries ]]; then
-        echo "Warning: Failed to trigger workflow 'infrastructure'. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-        sleep $retry_interval
+# Function for initializing
+initialize() {
+    update_GITHUB_AUTH_LOGIN
+    update_GITHUB_FORKS
+    update_MKDOCS_CONTAINER
+    update_PAT
+    update_CONTENT_REPOS_SECRETS
+    update_DEPLOY-KEYS
+    update_DOCS-BUILDER_SECRETS
+    #copy_docs-builder-workflow_to_docs-builder_repo
+    #copy_dispatch-workflow_to_content_repos
+    update_LW_AGENT_TOKEN
+    update_HUB_NVA_CREDENTIALS
+    update_ENVIRONMENT_GRADE
+    update_GPU_NODE_POOL
+    update_INFRASTRUCTURE_SECRETS
+    update_DEPLOYED
+    if [ "$RUN_INFRASTRUCTURE" = "true" ]; then
+    # Attempt to run the workflow up to three times
+    for ((attempt=1; attempt<=max_retries; attempt++)); do
+      if gh workflow run -R $GITHUB_ORG/$INFRASTRUCTURE_REPO_NAME "infrastructure"; then
+        break
       else
-        echo "Error: Failed to trigger workflow 'infrastructure' after $max_retries attempts. Exiting."
-        exit 1
+        if [[ $attempt -lt $max_retries ]]; then
+          echo "Warning: Failed to trigger workflow 'infrastructure'. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+          sleep $retry_interval
+        else
+          echo "Error: Failed to trigger workflow 'infrastructure' after $max_retries attempts. Exiting."
+          exit 1
+        fi
       fi
-    fi
-  done
+    done
+  fi
+}
+
+# Function for destroying
+destroy() {
+    echo "Destroying environment..."
+    # Add your destruction code here
+}
+
+# Function for creating
+create() {
+    update_AZ_AUTH_LOGIN
+    update_AZURE_SUBSCRIPTION_SELECTION
+    update_AZURE_TFSTATE_RESOURCES
+    update_AZURE_CREDENTIALS "$SUBSCRIPTION_ID"
+}
+
+# Check the number of arguments
+if [ $# -gt 1 ]; then
+    echo "Error: Only one parameter can be supplied."
+    show_help
+    exit 1
 fi
 
+# Set default action if no arguments are provided
+action="--initialize"
+if [ $# -eq 1 ]; then
+    action="$1"
+fi
+
+# Handle each parameter
+case "$action" in
+    --initialize)
+        initialize
+        ;;
+    --destroy)
+        destroy
+        ;;
+    --create)
+        create
+        ;;
+    --help)
+        show_help
+        ;;
+    *)
+        echo "Error: Unknown option '$action'"
+        show_help
+        exit 1
+        ;;
+esac
