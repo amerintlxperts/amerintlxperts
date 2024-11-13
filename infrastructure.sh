@@ -906,6 +906,7 @@ show_help() {
     echo "  --initialize    Default option. Initializes GitHub secrets and variables"
     echo "  --destroy       Destroys the environment."
     echo "  --create        Creates resources."
+    echo "  --sync-forks    Synchronize GitHub forks."
     echo "  --help          Displays this help message."
 }
 
@@ -946,6 +947,11 @@ create() {
     update_AZURE_SECRETS
 }
 
+sync-forks() {
+  update_GITHUB_AUTH_LOGIN
+  update_GITHUB_FORKS
+}
+
 # Check the number of arguments
 if [ $# -gt 1 ]; then
     echo "Error: Only one parameter can be supplied."
@@ -969,6 +975,9 @@ case "$action" in
         ;;
     --create)
         create
+        ;;
+    --sync-forks)
+        sync-forks
         ;;
     --help)
         show_help
