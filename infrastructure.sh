@@ -249,15 +249,32 @@ update_AZURE_TFSTATE_RESOURCES() {
     az storage account create -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --sku Standard_LRS
   fi
 
-  # Check if storage container exists
-  if ! az storage container show -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" &>/dev/null; then
-    az storage container create -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" --auth-mode login
+  # Adding a delay to ensure resources are fully available
+  sleep 10
+
+  attempt=1
+  max_attempts=5
+  while (( attempt <= max_attempts )); do
+    if az storage container show -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" &>/dev/null; then
+      break
+    else
+      if az storage container create -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" --auth-mode login; then
+        break
+      else
+        sleep 5
+      fi
+    fi
+    (( attempt++ ))
+  done
+
+  if (( attempt > max_attempts )); then
+    echo "Error: Failed to create storage container after $max_attempts attempts."
+    return 1
   fi
 }
 
 update_AZURE_CREDENTIALS() {
   local sp_output
-
   # Create or get existing service principal
   sp_output=$(az ad sp create-for-rbac --name "${PROJECT_NAME}" --role Contributor --scopes "/subscriptions/${1}" --sdk-auth --only-show-errors)
   clientId=$(echo "$sp_output" | jq -r .clientId)
@@ -271,11 +288,9 @@ update_AZURE_CREDENTIALS() {
     exit 1
   fi
 
-  # Check if role assignment already exists
   role_exists=$(az role assignment list --assignee "$clientId" --role "User Access Administrator" --scope "/subscriptions/$1" --query '[].id' -o tsv)
 
   if [[ -z "$role_exists" ]]; then
-    # Create role assignment if it doesn't exist
     az role assignment create --assignee "$clientId" --role "User Access Administrator" --scope "/subscriptions/$1" || {
       echo "Failed to assign the role. Exiting."
       exit 1
