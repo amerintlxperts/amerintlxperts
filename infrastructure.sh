@@ -476,6 +476,7 @@ update_DEPLOY-KEYS() {
     attempts=0
     while (( attempts < max_attempts )); do
       if gh repo deploy-key add $HOME/.ssh/id_ed25519-${repo}.pub --title 'DEPLOY-KEY' --repo ${GITHUB_ORG}/$repo; then
+        RUN_INFRASTRUCTURE="true"
         break
       else
         ((attempts++))
@@ -490,6 +491,7 @@ update_DEPLOY-KEYS() {
     normalized_repo=$(echo "$repo" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
     for ((attempt=1; attempt<=max_retries; attempt++)); do
       if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME; then
+        RUN_INFRASTRUCTURE="true"
         break
       else
         if [[ $attempt -lt $max_retries ]]; then
