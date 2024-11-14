@@ -13,6 +13,7 @@
   "MANIFESTS_INFRASTRUCTURE_REPO_NAME": "manifests-infrastructure",
   "MANIFESTS_APPLICATIONS_REPO_NAME": "manifests-applications",
   "MKDOCS_REPO_NAME": "mkdocs",
+  "HELM_CHARTS_REPO_NAME": "helm-charts",
   "DEPLOYED": "true",
   "PROJECT_NAME": "amerintlxperts",
   "LOCATION": "eastus"

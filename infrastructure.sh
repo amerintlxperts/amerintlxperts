@@ -25,15 +25,14 @@ INFRASTRUCTURE_REPO_NAME=$(jq -r '.INFRASTRUCTURE_REPO_NAME' "$INITJSON")
 MANIFESTS_INFRASTRUCTURE_REPO_NAME=$(jq -r '.MANIFESTS_INFRASTRUCTURE_REPO_NAME' "$INITJSON")
 MANIFESTS_APPLICATIONS_REPO_NAME=$(jq -r '.MANIFESTS_APPLICATIONS_REPO_NAME' "$INITJSON")
 MKDOCS_REPO_NAME=$(jq -r '.MKDOCS_REPO_NAME' "$INITJSON")
+HELM_CHARTS_REPO_NAME=$(jq -r '.HELM_CHARTS_REPO_NAME' "$INITJSON")
 
 readarray -t CONTENTREPOS < <(jq -r '.REPOS[]' "$INITJSON")
 readarray -t CONTENTREPOSONLY < <(jq -r '.REPOS[]' "$INITJSON")
 CONTENTREPOS+=("$THEME_REPO_NAME")
 CONTENTREPOS+=("$LANDING_PAGE_REPO_NAME")
 
-readarray -t DEPLOYKEYSREPOS < <(jq -r '.REPOS[]' "$INITJSON")
-DEPLOYKEYSREPOS+=("$THEME_REPO_NAME")
-DEPLOYKEYSREPOS+=("$LANDING_PAGE_REPO_NAME")
+DEPLOYKEYSREPOS=()
 DEPLOYKEYSREPOS+=("$MANIFESTS_INFRASTRUCTURE_REPO_NAME")
 DEPLOYKEYSREPOS+=("$MANIFESTS_APPLICATIONS_REPO_NAME")
 
@@ -52,6 +51,7 @@ ALLREPOS+=("$INFRASTRUCTURE_REPO_NAME")
 ALLREPOS+=("$MANIFESTS_INFRASTRUCTURE_REPO_NAME")
 ALLREPOS+=("$MANIFESTS_APPLICATIONS_REPO_NAME")
 ALLREPOS+=("$MKDOCS_REPO_NAME")
+ALLREPOS+=("$HELM_CHARTS_REPO_NAME")
 
 current_dir=$(pwd)
 max_retries=3
@@ -116,6 +116,8 @@ update_GITHUB_FORKS() {
   local local_array=(${ALLREPOS[@]})
   local upstream_org="amerintlxperts"
   local repo_owner="$GITHUB_ORG"
+  local max_retries=3  # Maximum number of retries
+  local delay_seconds=5  # Delay between retries in seconds
 
   for repo_name in "${local_array[@]}"; do
     if gh repo view "${repo_owner}/$repo_name" &> /dev/null; then
@@ -136,9 +138,22 @@ update_GITHUB_FORKS() {
       # Repository does not exist, fork it
       if gh repo fork "$upstream_org/$repo_name" --clone=false; then
         echo "Successfully forked $upstream_org/$repo_name."
-        if gh repo sync "$repo_owner/$repo_name" --branch main --force; then
-          echo "Successfully synced $repo_name after forking."
-        else
+        
+        # Retry mechanism for syncing after forking
+        local retry_count=0
+        while [[ $retry_count -lt $max_retries ]]; do
+          if gh repo sync "$repo_owner/$repo_name" --branch main --force; then
+            echo "Successfully synced $repo_name after forking."
+            break
+          else
+            ((retry_count++))
+            echo "Sync failed for $repo_name. Retrying in $delay_seconds seconds... (Attempt $retry_count of $max_retries)"
+            sleep $delay_seconds
+          fi
+        done
+        
+        # If max retries reached
+        if [[ $retry_count -eq $max_retries ]]; then
           echo "Failed to sync $repo_name after forking. Please check for errors."
         fi
       else
@@ -147,6 +162,7 @@ update_GITHUB_FORKS() {
     fi
   done
 }
+
 
 copy_dispatch-workflow_to_content_repos() {
   # Use a trap to ensure that temporary directories are cleaned up safely
@@ -460,6 +476,7 @@ update_DEPLOY-KEYS() {
     attempts=0
     while (( attempts < max_attempts )); do
       if gh repo deploy-key add $HOME/.ssh/id_ed25519-${repo}.pub --title 'DEPLOY-KEY' --repo ${GITHUB_ORG}/$repo; then
+        RUN_INFRASTRUCTURE="true"
         break
       else
         ((attempts++))
@@ -474,6 +491,7 @@ update_DEPLOY-KEYS() {
     normalized_repo=$(echo "$repo" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
     for ((attempt=1; attempt<=max_retries; attempt++)); do
       if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME; then
+        RUN_INFRASTRUCTURE="true"
         break
       else
         if [[ $attempt -lt $max_retries ]]; then
@@ -907,6 +925,7 @@ show_help() {
     echo "  --destroy       Destroys the environment."
     echo "  --create        Creates resources."
     echo "  --sync-forks    Synchronize GitHub forks."
+    echo "  --deploy-keys   Update DEPLOY-KEYS."
     echo "  --help          Displays this help message."
 }
 
@@ -952,6 +971,11 @@ sync-forks() {
   update_GITHUB_FORKS
 }
 
+deploy-keys() {
+  update_GITHUB_AUTH_LOGIN
+  update_DEPLOY-KEYS
+}
+
 # Check the number of arguments
 if [ $# -gt 1 ]; then
     echo "Error: Only one parameter can be supplied."
@@ -978,6 +1002,12 @@ case "$action" in
         ;;
     --sync-forks)
         sync-forks
+        ;;
+    --env-vars)
+        env-vars
+        ;;
+    --deploy-keys)
+        deploy-keys
         ;;
     --help)
         show_help
