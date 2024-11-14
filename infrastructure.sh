@@ -32,9 +32,7 @@ readarray -t CONTENTREPOSONLY < <(jq -r '.REPOS[]' "$INITJSON")
 CONTENTREPOS+=("$THEME_REPO_NAME")
 CONTENTREPOS+=("$LANDING_PAGE_REPO_NAME")
 
-readarray -t DEPLOYKEYSREPOS < <(jq -r '.REPOS[]' "$INITJSON")
-DEPLOYKEYSREPOS+=("$THEME_REPO_NAME")
-DEPLOYKEYSREPOS+=("$LANDING_PAGE_REPO_NAME")
+DEPLOYKEYSREPOS=()
 DEPLOYKEYSREPOS+=("$MANIFESTS_INFRASTRUCTURE_REPO_NAME")
 DEPLOYKEYSREPOS+=("$MANIFESTS_APPLICATIONS_REPO_NAME")
 
@@ -925,6 +923,7 @@ show_help() {
     echo "  --destroy       Destroys the environment."
     echo "  --create        Creates resources."
     echo "  --sync-forks    Synchronize GitHub forks."
+    echo "  --deploy-keys   Update DEPLOY-KEYS."
     echo "  --help          Displays this help message."
 }
 
@@ -970,6 +969,11 @@ sync-forks() {
   update_GITHUB_FORKS
 }
 
+deploy-keys() {
+  update_GITHUB_AUTH_LOGIN
+  update_DEPLOY-KEYS
+}
+
 # Check the number of arguments
 if [ $# -gt 1 ]; then
     echo "Error: Only one parameter can be supplied."
@@ -999,6 +1003,9 @@ case "$action" in
         ;;
     --env-vars)
         env-vars
+        ;;
+    --deploy-keys)
+        deploy-keys
         ;;
     --help)
         show_help
