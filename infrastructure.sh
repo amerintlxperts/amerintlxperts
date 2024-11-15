@@ -534,54 +534,6 @@ update_DOCS-BUILDER_SECRETS() {
       fi
     done
   done
-
-  # Check if the secret HTPASSWD exists
-  if gh secret list --repo "${GITHUB_ORG}/${DOCS_BUILDER_REPO_NAME}" | grep -q '^HTPASSWD\s'; then
-    read -rp "Change the Docs HTPASSWD? (N/y): " response
-    response=${response:-N}
-    if [[ "$response" =~ ^[Yy]$ ]]; then
-      read -srp "Enter new value for Docs HTPASSWD: " new_htpasswd_value
-      echo
-    else
-      return 0
-    fi
-  else
-    read -srp "Enter value for Docs HTPASSWD: " new_htpasswd_value
-    echo
-  fi
-
-  # Attempt to set the HTPASSWD secret with retries
-  for ((attempt=1; attempt<=max_retries; attempt++)); do
-    if gh secret set HTPASSWD -b "$new_htpasswd_value" --repo "${GITHUB_ORG}/${DOCS_BUILDER_REPO_NAME}"; then
-      break
-    else
-      if [[ $attempt -lt $max_retries ]]; then
-        echo "Warning: Failed to set GitHub secret HTPASSWD. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-        sleep $retry_interval
-      else
-        echo "Error: Failed to set GitHub secret HTPASSWD after $max_retries attempts. Exiting."
-        exit 1
-      fi
-    fi
-  done
-
-  # Reset attempt counter for running the workflow
-  attempt=1
-
-  # Attempt to run the workflow up to three times
-  for ((attempt=1; attempt<=max_retries; attempt++)); do
-    if gh workflow run -R "$GITHUB_ORG/${DOCS_BUILDER_REPO_NAME}" "docs-builder"; then
-      break
-    else
-      if [[ $attempt -lt $max_retries ]]; then
-        echo "Warning: Failed to trigger workflow 'docs-builder'. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-        sleep $retry_interval
-      else
-        echo "Error: Failed to trigger workflow 'docs-builder' after $max_retries attempts. Exiting."
-        exit 1
-      fi
-    fi
-  done
 }
 
 copy_docs-builder-workflow_to_docs-builder_repo() {
@@ -883,37 +835,91 @@ update_INFRASTRUCTURE_SECRETS() {
     done
   done
 
-    secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_INFRASTRUCTURE_REPO_NAME})                                                                                                                           
-    normalized_repo=$(echo "${MANIFESTS_INFRASTRUCTURE_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')                                                                                               
-    for ((attempt=1; attempt<=max_retries; attempt++)); do                                                                                                                  
-      if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then                                               
-        break                                                                                                                                                               
-      else                                                                                                                                                                  
-        if [[ $attempt -lt $max_retries ]]; then                                                                                                                            
-          echo "Warning: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."          
-          sleep $retry_interval                                                                                                                                             
-        else                                                                                                                                                                
-          echo "Error: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY after $max_retries attempts. Exiting."                                                
-          exit 1                                                                                                                                                            
-        fi                                                                                                                                                                  
-      fi                                                                                                                                                                    
-    done                                                                                                                                                                    
+  secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_INFRASTRUCTURE_REPO_NAME})                                                                                                                           
+  normalized_repo=$(echo "${MANIFESTS_INFRASTRUCTURE_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')                                                                                               
+  for ((attempt=1; attempt<=max_retries; attempt++)); do                                                                                                                  
+    if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+      RUN_INFRASTRUCTURE="true"                                               
+      break                                                                                                                                                               
+    else                                                                                                                                                                  
+      if [[ $attempt -lt $max_retries ]]; then                                                                                                                            
+        echo "Warning: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."          
+        sleep $retry_interval                                                                                                                                             
+      else                                                                                                                                                                
+        echo "Error: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY after $max_retries attempts. Exiting."                                                
+        exit 1                                                                                                                                                            
+      fi                                                                                                                                                                  
+    fi                                                                                                                                                                    
+  done                                                                                                                                                                    
           
-    secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_APPLICATIONS_REPO_NAME})                                                                                                                           
-    normalized_repo=$(echo "${MANIFESTS_APPLICATIONS_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')                                                                                               
-    for ((attempt=1; attempt<=max_retries; attempt++)); do                                                                                                                  
-      if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then                                               
-        break                                                                                                                                                               
-      else                                                                                                                                                                  
-        if [[ $attempt -lt $max_retries ]]; then                                                                                                                            
-          echo "Warning: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."          
-          sleep $retry_interval                                                                                                                                             
-        else                                                                                                                                                                
-          echo "Error: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY after $max_retries attempts. Exiting."                                                
-          exit 1                                                                                                                                                            
-        fi                                                                                                                                                                  
-      fi                                                                                                                                                                    
-    done  
+  secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_APPLICATIONS_REPO_NAME})                                                                                                                           
+  normalized_repo=$(echo "${MANIFESTS_APPLICATIONS_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')                                                                                               
+  for ((attempt=1; attempt<=max_retries; attempt++)); do                                                                                                                  
+    if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+      RUN_INFRASTRUCTURE="true"                                               
+      break                                                                                                                                                               
+    else                                                                                                                                                                  
+      if [[ $attempt -lt $max_retries ]]; then                                                                                                                            
+        echo "Warning: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."          
+        sleep $retry_interval                                                                                                                                             
+      else                                                                                                                                                                
+        echo "Error: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY after $max_retries attempts. Exiting."                                                
+        exit 1                                                                                                                                                            
+      fi                                                                                                                                                                  
+    fi                                                                                                                                                                    
+  done
+}
+
+update_HTPASSWD() {
+
+  # Check if the secret HTPASSWD exists
+  if gh secret list --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}" | grep -q '^HTPASSWD\s'; then
+    read -rp "Change the Docs HTPASSWD? (N/y): " response
+    response=${response:-N}
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+      read -srp "Enter new value for Docs HTPASSWD: " new_htpasswd_value
+      echo
+    else
+      return 0
+    fi
+  else
+    read -srp "Enter value for Docs HTPASSWD: " new_htpasswd_value
+    echo
+  fi
+
+  local max_retries=3
+  local retry_interval=5
+  # Attempt to set the HTPASSWD secret with retries
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    if gh secret set HTPASSWD -b "$new_htpasswd_value" --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}"; then
+      RUN_INFRASTRUCTURE="true"
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to set GitHub secret HTPASSWD. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to set GitHub secret HTPASSWD after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
+  done
+
+  # Attempt to set the HTUSERNAME secret with retries
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    if gh secret set HTUSERNAME -b "$GITHUB_ORG" --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}"; then
+      RUN_INFRASTRUCTURE="true"
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to set GitHub secret HTUSERNAME. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to set GitHub secret HTUSERNAME after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
+  done
 
 }
 
@@ -926,6 +932,7 @@ show_help() {
     echo "  --create        Creates resources."
     echo "  --sync-forks    Synchronize GitHub forks."
     echo "  --deploy-keys   Update DEPLOY-KEYS."
+    echo "  --htpasswd      Change the docs password."
     echo "  --help          Displays this help message."
 }
 
@@ -948,6 +955,7 @@ initialize() {
   update_INFRASTRUCTURE_VARIABLES
   update_LW_AGENT_TOKEN
   update_HUB_NVA_CREDENTIALS
+  update_HTPASSWD
   update_INFRASTRUCTURE_SECRETS
 }
 
@@ -974,6 +982,11 @@ sync-forks() {
 deploy-keys() {
   update_GITHUB_AUTH_LOGIN
   update_DEPLOY-KEYS
+}
+
+htpasswd() {
+  update_GITHUB_AUTH_LOGIN
+  update_HTPASSWD
 }
 
 # Check the number of arguments
@@ -1009,6 +1022,9 @@ case "$action" in
     --deploy-keys)
         deploy-keys
         ;;
+    --htpasswd)
+        htpasswd
+        ;;
     --help)
         show_help
         ;;
@@ -1020,17 +1036,22 @@ case "$action" in
 esac
 
 if [ "$RUN_INFRASTRUCTURE" = "true" ]; then
-  for ((attempt=1; attempt<=max_retries; attempt++)); do
-    if gh workflow run -R $GITHUB_ORG/$INFRASTRUCTURE_REPO_NAME "infrastructure"; then
-      break
-    else
-      if [[ $attempt -lt $max_retries ]]; then
-        echo "Warning: Failed to trigger workflow 'infrastructure'. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-        sleep $retry_interval
+  read -p "Do you wish to run the infrastructure workflow? [Y/n] " user_response
+  user_response=${user_response:-Y}
+
+  if [[ "$user_response" =~ ^[Yy]$ ]]; then
+    for ((attempt=1; attempt<=max_retries; attempt++)); do
+      if gh workflow run -R "$GITHUB_ORG/$INFRASTRUCTURE_REPO_NAME" "infrastructure"; then
+        break
       else
-        echo "Error: Failed to trigger workflow 'infrastructure' after $max_retries attempts. Exiting."
-        exit 1
+        if [[ $attempt -lt $max_retries ]]; then
+          echo "Warning: Failed to trigger workflow 'infrastructure'. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+          sleep $retry_interval
+        else
+          echo "Error: Failed to trigger workflow 'infrastructure' after $max_retries attempts. Exiting."
+          exit 1
+        fi
       fi
-    fi
-  done
+    done
+  fi
 fi
