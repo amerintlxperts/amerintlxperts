@@ -821,6 +821,53 @@ update_AZURE_SECRETS() {
   done
 }
 
+update_INFRASTRUCTURE_VARIABLES() {
+  local current_value
+  local new_value=""
+  local attempts
+  local max_attempts=3
+  declare -a app_list=("DEPLOYED" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL" "PRODUCTION_ENVIRONMENT")
+
+  for var_name in "${app_list[@]}"; do
+    current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
+
+    if [ -z "$current_value" ]; then
+      # Variable does not exist, prompt user to create it
+      read -p "Set initial $var_name value ('true' or 'false') (default: false)? " new_value
+      new_value=${new_value:-false}
+    else
+      # Variable exists, display the current value and prompt user for change
+      if [[ "$current_value" == "true" ]]; then
+        opposite_value="false"
+      else
+        opposite_value="true"
+      fi
+      read -p "Change current value of \"$var_name=$current_value\" to $opposite_value ? (N/y): " change_choice
+      change_choice=${change_choice:-N}
+      if [[ "$change_choice" =~ ^[Yy]$ ]]; then
+        new_value=$opposite_value
+      fi
+    fi
+
+    # If there's a new value to be set, attempt to update the variable
+    if [[ -n "$new_value" ]]; then
+      attempts=0
+      while (( attempts < max_attempts )); do
+        if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+          RUN_INFRASTRUCTURE="true"
+          break
+        else
+          ((attempts++))
+          if (( attempts < max_attempts )); then
+            echo "Retrying in $retry_interval seconds..."
+            sleep $retry_interval
+          fi
+        fi
+      done
+    fi
+  done
+}
+
 update_INFRASTRUCTURE_SECRETS() {
 
   for secret in \
