@@ -936,17 +936,17 @@ update_HTPASSWD() {
 }
 
 show_help() {
-    echo "Usage: $0 [--initialize | --destroy | --create | --help]"
+    echo "Usage: $0 [--initialize | --destroy | --create-azure-resources | --help]"
     echo
     echo "Options:"
-    echo "  --initialize    Default option. Initializes GitHub secrets and variables"
-    echo "  --destroy       Destroys the environment."
-    echo "  --create        Creates resources."
-    echo "  --sync-forks    Synchronize GitHub forks."
-    echo "  --deploy-keys   Update DEPLOY-KEYS."
-    echo "  --htpasswd      Change the docs password."
-    echo "  --management    Allow or Deny Management Access."
-    echo "  --help          Displays this help message."
+    echo "  --initialize              Default option. Initializes GitHub secrets and variables"
+    echo "  --destroy                 Destroys the environment."
+    echo "  --create-azure-resources  Creates resources."
+    echo "  --sync-forks              Synchronize GitHub forks."
+    echo "  --deploy-keys             Update DEPLOY-KEYS."
+    echo "  --htpasswd                Change the docs password."
+    echo "  --management              Allow or Deny Management Access."
+    echo "  --help                    Displays this help message."
 }
 
 # Function for initializing
@@ -979,7 +979,7 @@ destroy() {
 }
 
 # Function for creating
-create() {
+create-azure-resources() {
     update_AZ_AUTH_LOGIN
     update_AZURE_SUBSCRIPTION_SELECTION
     update_AZURE_TFSTATE_RESOURCES
@@ -1028,8 +1028,8 @@ case "$action" in
     --destroy)
         destroy
         ;;
-    --create)
-        create
+    --create-azure-resources)
+        create-azure-resources
         ;;
     --sync-forks)
         sync-forks
