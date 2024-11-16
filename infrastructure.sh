@@ -709,51 +709,63 @@ update_HUB_NVA_CREDENTIALS() {
   done
 }
 
-update_INFRASTRUCTURE_VARIABLES() {
-  local current_value
-  local new_value=""
-  local attempts
-  local max_attempts=3
-  declare -a app_list=("DEPLOYED" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL" "PRODUCTION_ENVIRONMENT")
+update_MANAGEMENT_ACCESS() {
+    max_retries=3
+    retry_interval=5
 
-  for var_name in "${app_list[@]}"; do
-    current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
+    # Function to get a valid response with default selection on Enter
+    get_valid_response() {
+        local current_value="${1:-N}"
+        local prompt_message="Allow access to Management? (N/y)"
 
-    if [ -z "$current_value" ]; then
-      # Variable does not exist, prompt user to create it
-      read -p "Set initial $var_name value ('true' or 'false') (default: false)? " new_value
-      new_value=${new_value:-false}
-    else
-      # Variable exists, display the current value and prompt user for change
-      if [[ "$current_value" == "true" ]]; then
-        opposite_value="false"
-      else
-        opposite_value="true"
-      fi
-      read -p "Change current value of \"$var_name=$current_value\" to $opposite_value ? (N/y): " change_choice
-      change_choice=${change_choice:-N}
-      if [[ "$change_choice" =~ ^[Yy]$ ]]; then
-        new_value=$opposite_value
-      fi
-    fi
-
-    # If there's a new value to be set, attempt to update the variable
-    if [[ -n "$new_value" ]]; then
-      attempts=0
-      while (( attempts < max_attempts )); do
-        if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-          RUN_INFRASTRUCTURE="true"
-          break
-        else
-          ((attempts++))
-          if (( attempts < max_attempts )); then
-            echo "Retrying in $retry_interval seconds..."
-            sleep $retry_interval
-          fi
+        if [[ -n "$current_value" ]]; then
+            prompt_message="Allow access to Management? (Current: $current_value) (N/y)"
         fi
-      done
+
+        read -rp "$prompt_message: " response
+        response=${response:-${current_value}}  # Default to current value if empty
+        case "${response,,}" in  # Convert to lowercase for case-insensitive matching
+            y) echo "Allow" ;;
+            n) echo "Deny" ;;
+            *) echo "${current_value,,}" | grep -q 'allow' && echo "Allow" || echo "Deny" ;;  # Fallback to current value if not 'y' or 'n'
+        esac
+    }
+
+    # Check if the GitHub variable exists
+    if gh variable list --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}" | grep -q '^MANAGEMENT_ACCESS\s'; then
+        # Get the current value of the variable
+        current_value=$(gh variable get MANAGEMENT_ACCESS --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}" --json value -q '.value')
+
+        # Prompt user if they want to change the value, default to N for no change
+        read -rp "Change Management Access? (Current: $current_value) (N/y): " change_response
+        change_response=${change_response:-N}
+        if [[ "$change_response" =~ ^[Yy]$ ]]; then
+            new_MANAGEMENT_ACCESS_value=$(get_valid_response "$current_value")
+        else
+            return
+        fi
+    else
+        # If variable doesn't exist, get a new value with default to N
+        new_MANAGEMENT_ACCESS_value=$(get_valid_response)
     fi
-  done
+
+    # Attempt to set the GitHub variable with retries
+    attempt=0
+    while (( attempt < max_retries )); do
+        if gh variable set MANAGEMENT_ACCESS -b "$new_MANAGEMENT_ACCESS_value" --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}"; then
+            export RUN_INFRASTRUCTURE="true"
+            break
+        else
+            attempt=$((attempt + 1))
+            if (( attempt < max_retries )); then
+                echo "Warning: Failed to set GitHub variable MANAGEMENT_ACCESS. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+                sleep $retry_interval
+            else
+                echo "Error: Failed to set GitHub variable MANAGEMENT_ACCESS after $max_retries attempts. Exiting."
+                exit 1
+            fi
+        fi
+    done
 }
 
 update_AZURE_SECRETS() {
@@ -933,6 +945,7 @@ show_help() {
     echo "  --sync-forks    Synchronize GitHub forks."
     echo "  --deploy-keys   Update DEPLOY-KEYS."
     echo "  --htpasswd      Change the docs password."
+    echo "  --management    Allow or Deny Management Access."
     echo "  --help          Displays this help message."
 }
 
@@ -989,6 +1002,11 @@ htpasswd() {
   update_HTPASSWD
 }
 
+management() {
+  update_GITHUB_AUTH_LOGIN
+  update_MANAGEMENT_ACCESS
+}
+
 # Check the number of arguments
 if [ $# -gt 1 ]; then
     echo "Error: Only one parameter can be supplied."
@@ -1024,6 +1042,9 @@ case "$action" in
         ;;
     --htpasswd)
         htpasswd
+        ;;
+    --management)
+        management
         ;;
     --help)
         show_help
