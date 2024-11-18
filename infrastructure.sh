@@ -992,6 +992,7 @@ show_help() {
     echo "  --deploy-keys             Update DEPLOY-KEYS."
     echo "  --htpasswd                Change the docs password."
     echo "  --management              Allow or Deny Management Access."
+    echo "  --hub-passwd              Change Fortiweb password."
     echo "  --help                    Displays this help message."
 }
 
@@ -1018,6 +1019,11 @@ initialize() {
   update_MANAGEMENT_ACCESS
   update_INFRASTRUCTURE_VARIABLES
   update_INFRASTRUCTURE_SECRETS
+}
+
+hub_password(){
+  update_GITHUB_AUTH_LOGIN
+  update_HUB_NVA_CREDENTIALS
 }
 
 # Function for destroying
@@ -1093,6 +1099,9 @@ case "$action" in
         ;;
     --management)
         management
+        ;;
+    --hub-passwd)
+        hub_password
         ;;
     --help)
         show_help
