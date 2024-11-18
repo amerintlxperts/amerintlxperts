@@ -25,5 +25,5 @@ jobs:
         uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0
         with:
           token: ${{ secrets.PAT }}
-          repository: ${{ github.repository_owner }}/${{ secrets.DOCS_BUILDER_REPO_NAME }}
-          event-type: ${{ secrets.DOCS_BUILDER_REPO_NAME }}
+          repository: ${{ github.repository_owner }}/${{ vars.DOCS_BUILDER_REPO_NAME }}
+          event-type: ${{ vars.DOCS_BUILDER_REPO_NAME }}
