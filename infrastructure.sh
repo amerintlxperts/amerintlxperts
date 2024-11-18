@@ -169,7 +169,6 @@ copy_dispatch-workflow_to_content_repos() {
   TEMP_DIR=$(mktemp -d)
   trap 'rm -rf "$TEMP_DIR"' EXIT
 
-  local github_token="$PAT"
   local file="dispatch.yml"
 
   # Check if dispatch.yml file exists before proceeding
@@ -182,8 +181,7 @@ copy_dispatch-workflow_to_content_repos() {
     # Return to the original working directory at the start of each loop iteration
     cd "$TEMP_DIR" || exit 1
 
-    # Clone the private repository using the GITHUB_TOKEN
-    if ! git clone "https://$github_token@github.com/${GITHUB_ORG}/$repo"; then
+    if ! git clone "https://github.com/${GITHUB_ORG}/$repo"; then
       echo "Error: Failed to clone repository $repo"
       continue
     fi
@@ -347,7 +345,6 @@ delete_AZURE_CREDENTIALS() {
   fi
 }
 
-
 update_MKDOCS_CONTAINER() {
   local repo="ghcr.io/${GITHUB_ORG}/mkdocs"
   local tag="latest"
@@ -420,21 +417,21 @@ update_PAT() {
   fi
 }
 
-update_CONTENT_REPOS_SECRETS() {
+update_CONTENT_REPOS_VARIABLES() {
   for repo in "${CONTENTREPOS[@]}"; do
-    for secret in \
+    for variable in \
       "DOCS_BUILDER_REPO_NAME:$DOCS_BUILDER_REPO_NAME"; do
-      key="${secret%%:*}"
-      value="${secret#*:}"
+      key="${variable%%:*}"
+      value="${variable#*:}"
       for ((attempt=1; attempt<=max_retries; attempt++)); do
-        if gh secret set "$key" -b "$value" --repo ${GITHUB_ORG}/$repo; then
+        if gh variable set "$key" -b "$value" --repo ${GITHUB_ORG}/$repo; then
           break
         else
           if [[ $attempt -lt $max_retries ]]; then
-            echo "Warning: Failed to set GitHub secret $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+            echo "Warning: Failed to set GitHub variable $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
             sleep $retry_interval
           else
-            echo "Error: Failed to set GitHub secret $key after $max_retries attempts. Exiting."
+            echo "Error: Failed to set GitHub variable $key after $max_retries attempts. Exiting."
             exit 1
           fi
         fi
@@ -507,28 +504,28 @@ update_DEPLOY-KEYS() {
   done
 }
 
-update_DOCS-BUILDER_SECRETS() {
+update_DOCS_BUILDER_VARIABLES() {
   local max_retries=3
   local retry_interval=5
   local attempt=1
 
-  # Update secrets using a loop
-  for secret in \
+  # Update variables using a loop
+  for variable in \
     "MKDOCS_REPO_NAME:$MKDOCS_REPO_NAME" \
     "MANIFESTS_APPLICATIONS_REPO_NAME:$MANIFESTS_APPLICATIONS_REPO_NAME" ; do
     
-    key="${secret%%:*}"
-    value="${secret#*:}"
+    key="${variable%%:*}"
+    value="${variable#*:}"
     
     for ((attempt=1; attempt<=max_retries; attempt++)); do
-      if gh secret set "$key" -b "$value" --repo "${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME"; then
+      if gh variable set "$key" -b "$value" --repo "${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME"; then
         break
       else
         if [[ $attempt -lt $max_retries ]]; then
-          echo "Warning: Failed to set GitHub secret $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+          echo "Warning: Failed to set GitHub variable $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
           sleep $retry_interval
         else
-          echo "Error: Failed to set GitHub secret $key after $max_retries attempts. Exiting."
+          echo "Error: Failed to set GitHub variable $key after $max_retries attempts. Exiting."
           exit 1
         fi
       fi
@@ -821,7 +818,7 @@ update_AZURE_SECRETS() {
   done
 }
 
-update_INFRASTRUCTURE_VARIABLES() {
+update_INFRASTRUCTURE_BOOLEAN_VARIABLES() {
   local current_value
   local new_value=""
   local attempts
@@ -868,31 +865,33 @@ update_INFRASTRUCTURE_VARIABLES() {
   done
 }
 
-update_INFRASTRUCTURE_SECRETS() {
-
-  for secret in \
+update_INFRASTRUCTURE_VARIABLES() {
+  for variable in \
     "PROJECT_NAME:${PROJECT_NAME}" \
     "LOCATION:${LOCATION}" \
     "ORG:${GITHUB_ORG}" \
-    "DOCS_BUILDER_REPO_NAME:$DOCS_BUILDER_REPO_NAME" \
-    "MANIFESTS_APPLICATIONS_REPO_NAME:${GITHUB_ORG}/${MANIFESTS_APPLICATIONS_REPO_NAME}" \
-    "MANIFESTS_INFRASTRUCTURE_REPO_NAME:${GITHUB_ORG}/${MANIFESTS_INFRASTRUCTURE_REPO_NAME}"; do
-    key="${secret%%:*}"
-    value="${secret#*:}"
+    "DOCS_BUILDER_REPO_NAME:${DOCS_BUILDER_REPO_NAME}" \
+    "MANIFESTS_APPLICATIONS_REPO_NAME:${MANIFESTS_APPLICATIONS_REPO_NAME}" \
+    "MANIFESTS_INFRASTRUCTURE_REPO_NAME:${MANIFESTS_INFRASTRUCTURE_REPO_NAME}"; do
+    key="${variable%%:*}"
+    value="${variable#*:}"
     for ((attempt=1; attempt<=max_retries; attempt++)); do
-      if gh secret set "$key" -b "$value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+      if gh variable set "$key" -b "$value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
         break
       else
         if [[ $attempt -lt $max_retries ]]; then
-          echo "Warning: Failed to set GitHub secret $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+          echo "Warning: Failed to set GitHub variable $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
           sleep $retry_interval
         else
-          echo "Error: Failed to set GitHub secret $key after $max_retries attempts. Exiting."
+          echo "Error: Failed to set GitHub variable $key after $max_retries attempts. Exiting."
           exit 1
         fi
       fi
     done
   done
+}
+
+update_INFRASTRUCTURE_SECRETS() {
 
   secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_INFRASTRUCTURE_REPO_NAME})                                                                                                                           
   normalized_repo=$(echo "${MANIFESTS_INFRASTRUCTURE_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')                                                                                               
@@ -1007,15 +1006,16 @@ initialize() {
   update_AZURE_SECRETS
   update_MKDOCS_CONTAINER
   update_PAT
-  update_CONTENT_REPOS_SECRETS
+  update_CONTENT_REPOS_VARIABLES
   update_DEPLOY-KEYS
-  update_DOCS-BUILDER_SECRETS
+  update_DOCS_BUILDER_VARIABLES
   #copy_docs-builder-workflow_to_docs-builder_repo
-  #copy_dispatch-workflow_to_content_repos
-  update_INFRASTRUCTURE_VARIABLES
+  copy_dispatch-workflow_to_content_repos
+  update_INFRASTRUCTURE_BOOLEAN_VARIABLES
   update_LW_AGENT_TOKEN
   update_HUB_NVA_CREDENTIALS
   update_HTPASSWD
+  update_INFRASTRUCTURE_VARIABLES
   update_INFRASTRUCTURE_SECRETS
 }
 
