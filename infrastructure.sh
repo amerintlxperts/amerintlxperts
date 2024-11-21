@@ -138,7 +138,7 @@ update_GITHUB_FORKS() {
       # Repository does not exist, fork it
       if gh repo fork "$upstream_org/$repo_name" --clone=false; then
         echo "Successfully forked $upstream_org/$repo_name."
-        
+
         # Retry mechanism for syncing after forking
         local retry_count=0
         while [[ $retry_count -lt $max_retries ]]; do
@@ -151,7 +151,7 @@ update_GITHUB_FORKS() {
             sleep $delay_seconds
           fi
         done
-        
+
         # If max retries reached
         if [[ $retry_count -eq $max_retries ]]; then
           echo "Failed to sync $repo_name after forking. Please check for errors."
@@ -388,7 +388,7 @@ update_PAT() {
       echo
     else
       new_PAT_value=""
-    fi 
+    fi
   fi
   if [[ -n "$new_PAT_value" ]]; then
     for repo in "${PATREPOS[@]}"; do
@@ -513,10 +513,10 @@ update_DOCS_BUILDER_VARIABLES() {
   for variable in \
     "MKDOCS_REPO_NAME:$MKDOCS_REPO_NAME" \
     "MANIFESTS_APPLICATIONS_REPO_NAME:$MANIFESTS_APPLICATIONS_REPO_NAME" ; do
-    
+
     key="${variable%%:*}"
     value="${variable#*:}"
-    
+
     for ((attempt=1; attempt<=max_retries; attempt++)); do
       if gh variable set "$key" -b "$value" --repo "${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME"; then
         break
@@ -606,7 +606,7 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
   echo -e "$clone_commands" | sed -e "/%%INSERTCLONEREPO%%/r /dev/stdin" -e "/%%INSERTCLONEREPO%%/d" "$tpl_file" | awk 'BEGIN { blank=0 } { if (/^$/) { blank++; if (blank <= 1) print; } else { blank=0; print; } }' > "$output_file"
 
   if [[ -n $(git status --porcelain) ]]; then
-    git add $output_file 
+    git add $output_file
     if git commit -m "Add or update docs-builder.yml workflow"; then
       git switch -C docs-builder main && git push && gh repo set-default $GITHUB_ORG/docs-builder && gh pr create --title "Initializing repo" --body "Update docs builder" && gh pr merge -m --delete-branch || echo "Warning: Failed to push changes to $repo"
     else
@@ -706,61 +706,6 @@ update_HUB_NVA_CREDENTIALS() {
   done
 }
 
-update_MANAGEMENT_ACCESS() {
-    max_retries=3
-    retry_interval=5
-
-    # Function to get a valid response with default selection on Enter
-    get_valid_response() {
-        local current_value="${1:-Deny}"
-        local prompt_message="Change Management Access (current: $current_value) (Allow=Y/Deny=N)"
-
-        while true; do
-            read -rp "$prompt_message: " response
-            response=${response:-${current_value}}  # Default to current value if empty
-            case "${response,,}" in  # Convert to lowercase for case-insensitive matching
-                y|Y) echo "Allow"; break ;;
-                n|N) echo "Deny"; break ;;
-                "${current_value,,}") echo "$current_value"; break ;;  # Accept current value if enter is pressed
-                *) echo "Invalid input. Please enter Y, N, or press Enter to keep the current value." ;;
-            esac
-        done
-    }
-
-    # Check if the GitHub variable exists
-    if gh variable list --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}" | grep -q '^MANAGEMENT_ACCESS\s'; then
-        # Get the current value of the variable
-        current_value=$(gh variable get MANAGEMENT_ACCESS --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}" --json value -q '.value')
-
-        # Prompt the user with the current value
-        new_MANAGEMENT_ACCESS_value=$(get_valid_response "$current_value")
-    else
-        # If variable doesn't exist, get a new value with default to Deny
-        new_MANAGEMENT_ACCESS_value=$(get_valid_response)
-    fi
-
-    # Update the GitHub variable only if the value has changed
-    if [[ "$new_MANAGEMENT_ACCESS_value" != "$current_value" ]]; then
-        # Attempt to set the GitHub variable with retries
-        attempt=0
-        while (( attempt < max_retries )); do
-            if gh variable set MANAGEMENT_ACCESS -b "$new_MANAGEMENT_ACCESS_value" --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}"; then
-                export RUN_INFRASTRUCTURE="true"
-                break
-            else
-                attempt=$((attempt + 1))
-                if (( attempt < max_retries )); then
-                    echo "Warning: Failed to set GitHub variable MANAGEMENT_ACCESS. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
-                    sleep $retry_interval
-                else
-                    echo "Error: Failed to set GitHub variable MANAGEMENT_ACCESS after $max_retries attempts. Exiting."
-                    exit 1
-                fi
-            fi
-        done
-    fi
-}
-
 update_AZURE_SECRETS() {
   for secret in \
     "AZURE_STORAGE_ACCOUNT_NAME:${AZURE_STORAGE_ACCOUNT_NAME}" \
@@ -793,10 +738,10 @@ update_AZURE_SECRETS() {
     "AZURE_CREDENTIALS:${AZURE_CREDENTIALS}" \
     "ARM_CLIENT_ID:${clientId}" \
     "ARM_CLIENT_SECRET:${clientSecret}" ; do
-    
+
     key="${secret%%:*}"
     value="${secret#*:}"
-    
+
     for ((attempt=1; attempt<=max_retries; attempt++)); do
       if gh secret set "$key" -b "$value" --repo "${GITHUB_ORG}/$DOCS_BUILDER_REPO_NAME"; then
         RUN_INFRASTRUCTURE="true"
@@ -814,12 +759,59 @@ update_AZURE_SECRETS() {
   done
 }
 
+update_MANAGEMENT_PUBLIC_IP() {
+  local current_value
+  local new_value=""
+  local attempts
+  local max_attempts=3
+  declare -a app_list=("MANAGEMENT_PUBLIC_IP")
+
+  for var_name in "${app_list[@]}"; do
+    current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
+
+    if [ -z "$current_value" ]; then
+      # Variable does not exist, prompt user to create it
+      read -p "Set initial $var_name value ('true' or 'false') (default: false)? " new_value
+      new_value=${new_value:-false}
+    else
+      # Variable exists, display the current value and prompt user for change
+      if [[ "$current_value" == "true" ]]; then
+        opposite_value="false"
+      else
+        opposite_value="true"
+      fi
+      read -p "Change current value of \"$var_name=$current_value\" to $opposite_value ? (N/y): " change_choice
+      change_choice=${change_choice:-N}
+      if [[ "$change_choice" =~ ^[Yy]$ ]]; then
+        new_value=$opposite_value
+      fi
+    fi
+
+    # If there's a new value to be set, attempt to update the variable
+    if [[ -n "$new_value" ]]; then
+      attempts=0
+      while (( attempts < max_attempts )); do
+        if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+          RUN_INFRASTRUCTURE="true"
+          break
+        else
+          ((attempts++))
+          if (( attempts < max_attempts )); then
+            echo "Retrying in $retry_interval seconds..."
+            sleep $retry_interval
+          fi
+        fi
+      done
+    fi
+  done
+}
+
 update_INFRASTRUCTURE_BOOLEAN_VARIABLES() {
   local current_value
   local new_value=""
   local attempts
   local max_attempts=3
-  declare -a app_list=("DEPLOYED" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL" "PRODUCTION_ENVIRONMENT")
+  declare -a app_list=("DEPLOYED" "MANAGEMENT_PUBLIC_IP" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL" "PRODUCTION_ENVIRONMENT")
 
   for var_name in "${app_list[@]}"; do
     current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
@@ -888,39 +880,38 @@ update_INFRASTRUCTURE_VARIABLES() {
 }
 
 update_INFRASTRUCTURE_SECRETS() {
+  secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_INFRASTRUCTURE_REPO_NAME})
+  normalized_repo=$(echo "${MANIFESTS_INFRASTRUCTURE_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+      RUN_INFRASTRUCTURE="true"
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
+  done
 
-  secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_INFRASTRUCTURE_REPO_NAME})                                                                                                                           
-  normalized_repo=$(echo "${MANIFESTS_INFRASTRUCTURE_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')                                                                                               
-  for ((attempt=1; attempt<=max_retries; attempt++)); do                                                                                                                  
+  secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_APPLICATIONS_REPO_NAME})
+  normalized_repo=$(echo "${MANIFESTS_APPLICATIONS_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
     if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-      RUN_INFRASTRUCTURE="true"                                               
-      break                                                                                                                                                               
-    else                                                                                                                                                                  
-      if [[ $attempt -lt $max_retries ]]; then                                                                                                                            
-        echo "Warning: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."          
-        sleep $retry_interval                                                                                                                                             
-      else                                                                                                                                                                
-        echo "Error: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY after $max_retries attempts. Exiting."                                                
-        exit 1                                                                                                                                                            
-      fi                                                                                                                                                                  
-    fi                                                                                                                                                                    
-  done                                                                                                                                                                    
-          
-  secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_APPLICATIONS_REPO_NAME})                                                                                                                           
-  normalized_repo=$(echo "${MANIFESTS_APPLICATIONS_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')                                                                                               
-  for ((attempt=1; attempt<=max_retries; attempt++)); do                                                                                                                  
-    if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-      RUN_INFRASTRUCTURE="true"                                               
-      break                                                                                                                                                               
-    else                                                                                                                                                                  
-      if [[ $attempt -lt $max_retries ]]; then                                                                                                                            
-        echo "Warning: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."          
-        sleep $retry_interval                                                                                                                                             
-      else                                                                                                                                                                
-        echo "Error: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY after $max_retries attempts. Exiting."                                                
-        exit 1                                                                                                                                                            
-      fi                                                                                                                                                                  
-    fi                                                                                                                                                                    
+      RUN_INFRASTRUCTURE="true"
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to set GitHub secret ${normalized_repo}_SSH_PRIVATE_KEY after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
   done
 }
 
@@ -987,7 +978,7 @@ show_help() {
     echo "  --sync-forks              Synchronize GitHub forks."
     echo "  --deploy-keys             Update DEPLOY-KEYS."
     echo "  --htpasswd                Change the docs password."
-    echo "  --management              Allow or Deny Management Access."
+    echo "  --management-ip           Management IP Address"
     echo "  --hub-passwd              Change Fortiweb password."
     echo "  --help                    Displays this help message."
 }
@@ -1012,7 +1003,6 @@ initialize() {
   update_LW_AGENT_TOKEN
   update_HUB_NVA_CREDENTIALS
   update_HTPASSWD
-  update_MANAGEMENT_ACCESS
   update_INFRASTRUCTURE_VARIABLES
   update_INFRASTRUCTURE_SECRETS
 }
@@ -1052,9 +1042,9 @@ htpasswd() {
   update_HTPASSWD
 }
 
-management() {
+management-ip() {
   update_GITHUB_AUTH_LOGIN
-  update_MANAGEMENT_ACCESS
+  update_MANAGEMENT_PUBLIC_IP
 }
 
 # Check the number of arguments
@@ -1093,8 +1083,8 @@ case "$action" in
     --htpasswd)
         htpasswd
         ;;
-    --management)
-        management
+    --management-ip)
+        management-ip
         ;;
     --hub-passwd)
         hub_password
