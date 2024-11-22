@@ -879,7 +879,7 @@ update_INFRASTRUCTURE_VARIABLES() {
   done
 }
 
-update_INFRASTRUCTURE_SECRETS() {
+update_MANIFESTS_PRIVATE_KEYS() {
   secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_INFRASTRUCTURE_REPO_NAME})
   normalized_repo=$(echo "${MANIFESTS_INFRASTRUCTURE_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
   for ((attempt=1; attempt<=max_retries; attempt++)); do
@@ -913,6 +913,70 @@ update_INFRASTRUCTURE_SECRETS() {
       fi
     fi
   done
+}
+
+update_GODADDY_TOKEN() {
+
+  if gh secret list --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}" | grep -q '^GODADDY_API_KEY\s'; then
+    read -rp "Change the GODADDY_API_KEY? (N/y): " response
+    response=${response:-N}
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+      read -srp "Enter new value for GODADDY_API_KEY: " new_GODADDY_API_KEY_value
+      echo
+    else
+      return 0
+    fi
+  else
+    read -srp "Enter value for GODADDY_API_KEY: " new_GODADDY_API_KEY_value
+    echo
+  fi
+
+  local max_retries=3
+  local retry_interval=5
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    if gh secret set GODADDY_API_KEY -b "$new_GODADDY_API_KEY_value" --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}"; then
+      RUN_INFRASTRUCTURE="true"
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to set GitHub secret GODADDY_API_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to set GitHub secret GODADDY_API_KEY after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
+  done
+
+  if gh secret list --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}" | grep -q '^GODADDY_SECRET_KEY\s'; then
+    read -rp "Change the GODADDY_SECRET_KEY? (N/y): " response
+    response=${response:-N}
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+      read -srp "Enter new value for GODADDY_SECRET_KEY: " new_GODADDY_SECRET_KEY_value
+      echo
+    else
+      return 0
+    fi
+  else
+    read -srp "Enter value for GODADDY_SECRET_KEY: " new_GODADDY_SECRET_KEY_value
+    echo
+  fi
+
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    if gh secret set GODADDY_SECRET_KEY -b "$new_GODADDY_SECRET_KEY_value" --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}"; then
+      RUN_INFRASTRUCTURE="true"
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to set GitHub secret GODADDY_SECRET_KEY. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to set GitHub secret GODADDY_SECRET_KEY after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
+  done
+
 }
 
 update_HTPASSWD() {
@@ -980,6 +1044,7 @@ show_help() {
     echo "  --htpasswd                Change the docs password."
     echo "  --management-ip           Management IP Address"
     echo "  --hub-passwd              Change Fortiweb password."
+    echo "  --godaddy-token           Change godaddy DNS API key and secret."
     echo "  --help                    Displays this help message."
 }
 
@@ -998,13 +1063,14 @@ initialize() {
   update_DEPLOY-KEYS
   update_DOCS_BUILDER_VARIABLES
   #copy_docs-builder-workflow_to_docs-builder_repo
-  copy_dispatch-workflow_to_content_repos
+  #copy_dispatch-workflow_to_content_repos
   update_INFRASTRUCTURE_BOOLEAN_VARIABLES
   update_LW_AGENT_TOKEN
   update_HUB_NVA_CREDENTIALS
+  update_GODADDY_TOKEN
   update_HTPASSWD
   update_INFRASTRUCTURE_VARIABLES
-  update_INFRASTRUCTURE_SECRETS
+  update_MANIFESTS_PRIVATE_KEYS
 }
 
 hub_password(){
@@ -1040,6 +1106,11 @@ deploy-keys() {
 htpasswd() {
   update_GITHUB_AUTH_LOGIN
   update_HTPASSWD
+}
+
+godaddy-token() {
+  update_GITHUB_AUTH_LOGIN
+  update_GODADDY_TOKEN
 }
 
 management-ip() {
@@ -1088,6 +1159,9 @@ case "$action" in
         ;;
     --hub-passwd)
         hub_password
+        ;;
+    --godaddy-token)
+        godaddy-token
         ;;
     --help)
         show_help
