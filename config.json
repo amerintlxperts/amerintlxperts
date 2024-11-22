@@ -16,5 +16,6 @@
   "HELM_CHARTS_REPO_NAME": "helm-charts",
   "DEPLOYED": "true",
   "PROJECT_NAME": "amerintlxperts",
-  "LOCATION": "eastus"
+  "LOCATION": "eastus",
+  "DNS_ZONE": "bankexample.com"
 }
