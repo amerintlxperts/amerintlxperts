@@ -13,7 +13,6 @@ if [[ ! -f "$INITJSON" ]]; then
   exit 1
 fi
 
-# Constants
 DEPLOYED=$(jq -r '.DEPLOYED' "$INITJSON")
 PROJECT_NAME=$(jq -r '.PROJECT_NAME' "$INITJSON")
 DOCS_USERNAME=$(jq -r '.PROJECT_NAME' "$INITJSON")
@@ -26,7 +25,7 @@ MANIFESTS_INFRASTRUCTURE_REPO_NAME=$(jq -r '.MANIFESTS_INFRASTRUCTURE_REPO_NAME'
 MANIFESTS_APPLICATIONS_REPO_NAME=$(jq -r '.MANIFESTS_APPLICATIONS_REPO_NAME' "$INITJSON")
 MKDOCS_REPO_NAME=$(jq -r '.MKDOCS_REPO_NAME' "$INITJSON")
 HELM_CHARTS_REPO_NAME=$(jq -r '.HELM_CHARTS_REPO_NAME' "$INITJSON")
-DNS_ZONE=$(jq -r '.DNS_ZONE' "$INITJSON") 
+DNS_ZONE=$(jq -r '.DNS_ZONE' "$INITJSON")
 
 readarray -t CONTENTREPOS < <(jq -r '.REPOS[]' "$INITJSON")
 readarray -t CONTENTREPOSONLY < <(jq -r '.REPOS[]' "$INITJSON")
@@ -64,11 +63,12 @@ if [[ -z "$DEPLOYED" || -z "$PROJECT_NAME" || -z "$LOCATION" || ${#CONTENTREPOS[
   exit 1
 fi
 
-# Extract GitHub organization and control repo
 GITHUB_ORG=$(git config --get remote.origin.url | sed -n 's#.*/\([^/]*\)/.*#\1#p')
 if [ "$GITHUB_ORG" != "$PROJECT_NAME" ]; then
     PROJECT_NAME="${GITHUB_ORG}-${PROJECT_NAME}"
+    DNS_ZONE="${GITHUB_ORG}.${DNS_ZONE}"
 fi
+
 AZURE_STORAGE_ACCOUNT_NAME=$(echo "{$PROJECT_NAME}account" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z' | cut -c 1-24)
 if [[ "$MKDOCS_REPO_NAME" != */* ]]; then
   MKDOCS_REPO_NAME="ghcr.io/${GITHUB_ORG}/${MKDOCS_REPO_NAME}"
@@ -81,9 +81,6 @@ if [[ -z "$GITHUB_ORG" ]]; then
   echo "Could not detect GitHub organization. Exiting."
   exit 1
 fi
-
-# Function to ensure the user is authenticated to GitHub
-
 
 get_github_username() {
     local output=$(gh auth status 2>/dev/null)
