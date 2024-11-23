@@ -65,8 +65,11 @@ fi
 
 GITHUB_ORG=$(git config --get remote.origin.url | sed -n 's#.*/\([^/]*\)/.*#\1#p')
 if [ "$GITHUB_ORG" != "$PROJECT_NAME" ]; then
-    PROJECT_NAME="${GITHUB_ORG}-${PROJECT_NAME}"
-    DNS_ZONE="${GITHUB_ORG}.${DNS_ZONE}"
+  PROJECT_NAME="${GITHUB_ORG}-${PROJECT_NAME}"
+  DNS_ZONE="${GITHUB_ORG}.${DNS_ZONE}"
+  LETSENCRYPT_URL='https://acme-staging-v02.api.letsencrypt.org/directory'
+else
+  LETSENCRYPT_URL='"https://acme-v02.api.letsencrypt.org/directory'
 fi
 
 AZURE_STORAGE_ACCOUNT_NAME=$(echo "{$PROJECT_NAME}account" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z' | cut -c 1-24)
@@ -857,6 +860,7 @@ update_INFRASTRUCTURE_VARIABLES() {
     "DNS_ZONE:${DNS_ZONE}" \
     "LOCATION:${LOCATION}" \
     "ORG:${GITHUB_ORG}" \
+    "LETSENCRYPT_URL:${LETSENCRYPT_URL}" \
     "DOCS_BUILDER_REPO_NAME:${DOCS_BUILDER_REPO_NAME}" \
     "MANIFESTS_APPLICATIONS_REPO_NAME:${MANIFESTS_APPLICATIONS_REPO_NAME}" \
     "MANIFESTS_INFRASTRUCTURE_REPO_NAME:${MANIFESTS_INFRASTRUCTURE_REPO_NAME}"; do
