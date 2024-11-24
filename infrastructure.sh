@@ -69,7 +69,7 @@ if [ "$GITHUB_ORG" != "$PROJECT_NAME" ]; then
   DNS_ZONE="${GITHUB_ORG}.${DNS_ZONE}"
   LETSENCRYPT_URL='https://acme-staging-v02.api.letsencrypt.org/directory'
 else
-  LETSENCRYPT_URL='"https://acme-v02.api.letsencrypt.org/directory'
+  LETSENCRYPT_URL='https://acme-v02.api.letsencrypt.org/directory'
 fi
 
 AZURE_STORAGE_ACCOUNT_NAME=$(echo "{$PROJECT_NAME}account" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z' | cut -c 1-24)
