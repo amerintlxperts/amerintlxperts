@@ -65,8 +65,11 @@ fi
 
 GITHUB_ORG=$(git config --get remote.origin.url | sed -n 's#.*/\([^/]*\)/.*#\1#p')
 if [ "$GITHUB_ORG" != "$PROJECT_NAME" ]; then
-    PROJECT_NAME="${GITHUB_ORG}-${PROJECT_NAME}"
-    DNS_ZONE="${GITHUB_ORG}.${DNS_ZONE}"
+  PROJECT_NAME="${GITHUB_ORG}-${PROJECT_NAME}"
+  DNS_ZONE="${GITHUB_ORG}.${DNS_ZONE}"
+  LETSENCRYPT_URL='https://acme-staging-v02.api.letsencrypt.org/directory'
+else
+  LETSENCRYPT_URL='"https://acme-v02.api.letsencrypt.org/directory'
 fi
 
 AZURE_STORAGE_ACCOUNT_NAME=$(echo "{$PROJECT_NAME}account" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z' | cut -c 1-24)
@@ -220,6 +223,54 @@ update_AZ_AUTH_LOGIN() {
       az login --use-device-code
     fi
   fi
+  OWNER_EMAIL=$(az account show --query user.name -o tsv)
+  if [[ -z "$OWNER_EMAIL" || ! "$OWNER_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+    echo "Error: OWNER_EMAIL is not properly initialized or is not in a valid email format." >&2
+    exit 1
+  fi
+  get_signed_in_user_name
+}
+
+update_OWNER_EMAIL() {
+    
+  local max_retries=3                                                                                                                                         
+  local retry_interval=5                                                                                                                                      
+  for ((attempt=1; attempt<=max_retries; attempt++)); do                                                                                                      
+    if gh secret set OWNER_EMAIL -b "$OWNER_EMAIL" --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}"; then                                               
+      RUN_INFRASTRUCTURE="true"                                                                                                                               
+      break                                                                                                                                                   
+    else                                                                                                                                                      
+      if [[ $attempt -lt $max_retries ]]; then                                                                                                                
+        echo "Warning: Failed to set GitHub secret OWNER_EMAIL. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."                        
+        sleep $retry_interval                                                                                                                                 
+      else                                                                                                                                                    
+        echo "Error: Failed to set GitHub secret OWNER_EMAIL:$ after $max_retries attempts. Exiting."                                                              
+        exit 1                                                                                                                                                
+      fi                                                                                                                                                      
+    fi                                                                                                                                                        
+  done
+}
+
+get_signed_in_user_name() {
+  # Get the JSON output of the current signed-in user
+  user_info=$(az ad signed-in-user show --output json)
+
+  # Extract givenName, surname, and displayName from the JSON output
+  given_name=$(echo "$user_info" | jq -r '.givenName')
+  surname=$(echo "$user_info" | jq -r '.surname')
+  display_name=$(echo "$user_info" | jq -r '.displayName')
+
+  # Determine which value to use for the NAME variable
+  if [[ "$given_name" != "null" && "$surname" != "null" ]]; then
+    NAME="$given_name $surname"
+  elif [[ "$display_name" != "null" ]]; then
+    NAME="$display_name"
+  else
+    read -p "Please enter your full name: " NAME
+  fi
+
+  # Export the NAME variable for further use if needed
+  export NAME
 }
 
 update_AZURE_SUBSCRIPTION_SELECTION() {
@@ -251,26 +302,46 @@ update_AZURE_SUBSCRIPTION_SELECTION() {
 }
 
 update_AZURE_TFSTATE_RESOURCES() {
+  # Ensure OWNER_EMAIL is set
+  if [[ -z "$OWNER_EMAIL" || ! "$OWNER_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+    echo "Error: OWNER_EMAIL is not properly initialized or is not in a valid email format." >&2
+    return 1
+  fi
+
+  # Ensure NAME is set
+  if [[ -z "$NAME" ]]; then
+    echo "Error: NAME is not properly initialized." >&2
+    return 1
+  fi
+
+  # Define tags
+  TAGS="Username=$OWNER_EMAIL Name='$NAME'"
+
   # Check if resource group exists
   if ! az group show -n "${PROJECT_NAME}-tfstate" &>/dev/null; then
-    az group create -n "${PROJECT_NAME}-tfstate" -l "${LOCATION}"
+    az group create -n "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --tags $TAGS
+  else
+    az group update -n "${PROJECT_NAME}-tfstate" --set tags."Username"="$OWNER_EMAIL" tags."FullName"="$NAME"
   fi
 
   # Check if storage account exists
   if ! az storage account show -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" &>/dev/null; then
-    az storage account create -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --sku Standard_LRS
+    az storage account create -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --sku Standard_LRS --tags $TAGS
+  else
+    az storage account update -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" --set tags."Username"="$OWNER_EMAIL" tags."Name"="$NAME"
   fi
 
   # Adding a delay to ensure resources are fully available
   sleep 10
 
+  # Attempt to create or verify storage container
   attempt=1
   max_attempts=5
   while (( attempt <= max_attempts )); do
     if az storage container show -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" &>/dev/null; then
       break
     else
-      if az storage container create -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" --auth-mode login; then
+      if az storage container create -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" --auth-mode login --metadata Username="$OWNER_EMAIL" Name="$NAME"; then
         break
       else
         sleep 5
@@ -618,7 +689,6 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
 }
 
 update_LW_AGENT_TOKEN() {
-    # Check if the secret HTPASSWD exists
     if gh secret list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME | grep -q '^LW_AGENT_TOKEN\s'; then
         read -rp "Change the Laceworks token ? (N/y): " response
         response=${response:-N}
@@ -809,9 +879,11 @@ update_INFRASTRUCTURE_BOOLEAN_VARIABLES() {
   local new_value=""
   local attempts
   local max_attempts=3
+  local retry_interval=5
   declare -a app_list=("DEPLOYED" "MANAGEMENT_PUBLIC_IP" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL" "PRODUCTION_ENVIRONMENT")
 
   for var_name in "${app_list[@]}"; do
+    # Fetch current variable value
     current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"$var_name\") | .value")
 
     if [ -z "$current_value" ]; then
@@ -820,15 +892,14 @@ update_INFRASTRUCTURE_BOOLEAN_VARIABLES() {
       new_value=${new_value:-false}
     else
       # Variable exists, display the current value and prompt user for change
-      if [[ "$current_value" == "true" ]]; then
-        opposite_value="false"
-      else
-        opposite_value="true"
-      fi
-      read -p "Change current value of \"$var_name=$current_value\" to $opposite_value ? (N/y): " change_choice
+      read -p "Change current value of \"$var_name=$current_value\": (N/y)? " change_choice
       change_choice=${change_choice:-N}
       if [[ "$change_choice" =~ ^[Yy]$ ]]; then
-        new_value=$opposite_value
+        if [[ "$current_value" == "true" ]]; then
+          new_value="false"
+        else
+          new_value="true"
+        fi
       fi
     fi
 
@@ -837,19 +908,26 @@ update_INFRASTRUCTURE_BOOLEAN_VARIABLES() {
       attempts=0
       while (( attempts < max_attempts )); do
         if gh variable set "$var_name" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+          echo "Successfully updated $var_name to $new_value"
           RUN_INFRASTRUCTURE="true"
           break
         else
           ((attempts++))
           if (( attempts < max_attempts )); then
-            echo "Retrying in $retry_interval seconds..."
+            echo "Warning: Failed to update variable \"$var_name\". Retrying in $retry_interval seconds... (Attempt $attempts of $max_attempts)"
             sleep $retry_interval
+          else
+            echo "Error: Failed to update variable \"$var_name\" after $max_attempts attempts."
           fi
         fi
       done
     fi
+
+    # Clear new_value for next iteration
+    new_value=""
   done
 }
+
 
 update_INFRASTRUCTURE_VARIABLES() {
   for variable in \
@@ -857,6 +935,8 @@ update_INFRASTRUCTURE_VARIABLES() {
     "DNS_ZONE:${DNS_ZONE}" \
     "LOCATION:${LOCATION}" \
     "ORG:${GITHUB_ORG}" \
+    "NAME:${NAME}" \
+    "LETSENCRYPT_URL:${LETSENCRYPT_URL}" \
     "DOCS_BUILDER_REPO_NAME:${DOCS_BUILDER_REPO_NAME}" \
     "MANIFESTS_APPLICATIONS_REPO_NAME:${MANIFESTS_APPLICATIONS_REPO_NAME}" \
     "MANIFESTS_INFRASTRUCTURE_REPO_NAME:${MANIFESTS_INFRASTRUCTURE_REPO_NAME}"; do
@@ -987,6 +1067,7 @@ initialize() {
   update_GITHUB_AUTH_LOGIN
   update_GITHUB_FORKS
   update_AZ_AUTH_LOGIN
+  update_OWNER_EMAIL
   update_AZURE_SUBSCRIPTION_SELECTION
   update_AZURE_TFSTATE_RESOURCES
   update_AZURE_CREDENTIALS "$SUBSCRIPTION_ID"
@@ -1011,15 +1092,14 @@ hub_password(){
   update_HUB_NVA_CREDENTIALS
 }
 
-# Function for destroying
 destroy() {
     echo "Destroying environment..."
     # Add your destruction code here
 }
 
-# Function for creating
 create-azure-resources() {
     update_AZ_AUTH_LOGIN
+    update_OWNER_EMAIL
     update_AZURE_SUBSCRIPTION_SELECTION
     update_AZURE_TFSTATE_RESOURCES
     update_AZURE_CREDENTIALS "$SUBSCRIPTION_ID"
