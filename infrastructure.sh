@@ -15,7 +15,6 @@ fi
 
 DEPLOYED=$(jq -r '.DEPLOYED' "$INITJSON")
 PROJECT_NAME=$(jq -r '.PROJECT_NAME' "$INITJSON")
-DOCS_USERNAME=$(jq -r '.PROJECT_NAME' "$INITJSON")
 LOCATION=$(jq -r '.LOCATION' "$INITJSON")
 THEME_REPO_NAME=$(jq -r '.THEME_REPO_NAME' "$INITJSON")
 LANDING_PAGE_REPO_NAME=$(jq -r '.LANDING_PAGE_REPO_NAME' "$INITJSON")
@@ -71,6 +70,8 @@ if [ "$GITHUB_ORG" != "$PROJECT_NAME" ]; then
 else
   LETSENCRYPT_URL='https://acme-v02.api.letsencrypt.org/directory'
 fi
+DOCS_FQDN="docs.${DNS_ZONE}"
+OLLAMA_FQDN="ollama.${DNS_ZONE}"
 
 AZURE_STORAGE_ACCOUNT_NAME=$(echo "{$PROJECT_NAME}account" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z' | cut -c 1-24)
 if [[ "$MKDOCS_REPO_NAME" != */* ]]; then
@@ -86,7 +87,8 @@ if [[ -z "$GITHUB_ORG" ]]; then
 fi
 
 get_github_username() {
-    local output=$(gh auth status 2>/dev/null)
+    local output
+    output=$(gh auth status 2>/dev/null)
     if [[ $? -ne 0 ]]; then
         echo "Error retrieving GitHub status."
         return 1
@@ -95,7 +97,8 @@ get_github_username() {
 }
 
 prompt_github_username() {
-    local default_user=$(get_github_username)
+    local default_user
+    default_user=$(get_github_username)
     read -e -p "Enter your personal GitHub account name [${default_user:-no user found}]: " USER
     USER="${USER:-$default_user}"
     if [[ -z "$USER" ]]; then
@@ -486,6 +489,28 @@ update_PAT() {
   fi
 }
 
+update_MANIFESTS_APPLICATIONS_VARIABLES() {
+    for variable in \
+      "OLLAMA_FQDN:$OLLAMA_FQDN" \
+      "DOCS_FQDN:$DOCS_FQDN" ; do
+      key="${variable%%:*}"
+      value="${variable#*:}"
+      for ((attempt=1; attempt<=max_retries; attempt++)); do
+        if gh variable set "$key" -b "$value" --repo ${GITHUB_ORG}/$MANIFESTS_APPLICATIONS_REPO_NAME; then
+          break
+        else
+          if [[ $attempt -lt $max_retries ]]; then
+            echo "Warning: Failed to set GitHub variable $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+            sleep $retry_interval
+          else
+            echo "Error: Failed to set GitHub variable $key after $max_retries attempts. Exiting."
+            exit 1
+          fi
+        fi
+      done
+    done
+}
+
 update_CONTENT_REPOS_VARIABLES() {
   for repo in "${CONTENTREPOS[@]}"; do
     for variable in \
@@ -606,7 +631,8 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
   local tpl_file="${current_dir}/docs-builder.tpl"
   local github_token="$PAT"
   local output_file=".github/workflows/docs-builder.yml"
-  local theme_secret_key_name="$(echo "$THEME_REPO_NAME" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
+  local theme_secret_key_name
+  theme_secret_key_name="$(echo "$THEME_REPO_NAME" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
 
   # Use a trap to ensure that temporary directories are cleaned up safely
   TEMP_DIR=$(mktemp -d)
@@ -628,7 +654,8 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
 
   # Start building the clone repo commands string
   local clone_commands=""
-  local landing_page_secret_key_name="$(echo "${LANDING_PAGE_REPO_NAME}" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
+  local landing_page_secret_key_name
+  landing_page_secret_key_name="$(echo "${LANDING_PAGE_REPO_NAME}" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
   clone_commands+="      - name: Clone Landing Page\n"
   clone_commands+="        shell: bash\n"
   clone_commands+="        run: |\n"
@@ -643,7 +670,8 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
   clone_commands+="          echo 'site_name: \"Hands on Labs\"' > \$TEMP_DIR/landing-page/mkdocs.yml\n"
   clone_commands+="          echo 'INHERIT: docs/theme/mkdocs.yml' > \$TEMP_DIR/landing-page/mkdocs.yml\n\n"
 
-  local theme_secret_key_name="$(echo "${THEME_REPO_NAME}" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
+  local theme_secret_key_name
+  theme_secret_key_name="$(echo "${THEME_REPO_NAME}" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
   clone_commands+="      - name: Clone Theme\n"
   clone_commands+="        shell: bash\n"
   clone_commands+="        run: |\n"
@@ -657,9 +685,9 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
   clone_commands+="      - name: Clone Content Repos\n"
   clone_commands+="        shell: bash\n"
   clone_commands+="        run: |\n"
-
+  local secret_key_name
   for repo in "${CONTENTREPOSONLY[@]}"; do
-    local secret_key_name="$(echo "$repo" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
+    secret_key_name="$(echo "$repo" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
     clone_commands+="          mkdir -p \$TEMP_DIR/src/${repo}\n"
     clone_commands+="          if [ -f ~/.ssh/id_ed25519 ]; then chmod 600 ~/.ssh/id_ed25519; fi\n"
     clone_commands+="          echo '\${{ secrets.${secret_key_name} }}' > ~/.ssh/id_ed25519 && chmod 400 ~/.ssh/id_ed25519\n"
@@ -928,7 +956,6 @@ update_INFRASTRUCTURE_BOOLEAN_VARIABLES() {
   done
 }
 
-
 update_INFRASTRUCTURE_VARIABLES() {
   for variable in \
     "PROJECT_NAME:${PROJECT_NAME}" \
@@ -1085,6 +1112,7 @@ initialize() {
   update_HTPASSWD
   update_INFRASTRUCTURE_VARIABLES
   update_MANIFESTS_PRIVATE_KEYS
+  update_MANIFESTS_APPLICATIONS_VARIABLES
 }
 
 hub_password(){

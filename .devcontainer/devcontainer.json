@@ -2,9 +2,9 @@
   "image": "ghcr.io/amerintlxperts/devcontainer:latest",
   "initializeCommand": "docker pull ghcr.io/amerintlxperts/devcontainer:latest",
   "containerEnv": {
-    "OLLAMA_HOST": "robinmordasiewicz-amerintlxperts-ai.eastus.cloudapp.azure.com:80",
-    "OCO_AI_PROVIDER": "ollama/codestral:latest",
-    "OCO_OLLAMA_API_URL": "http://robinmordasiewicz-amerintlxperts-ai.eastus.cloudapp.azure.com:80/api/chat",
+    "OLLAMA_HOST": "https://ollama.robinmordasiewicz.amerintlxperts.com:443",
+    "OCO_AI_PROVIDER": "llama3.2:3b",
+    "OCO_OLLAMA_API_URL": "https://ollama.robinmordasiewicz.amerintlxperts.com:443/api/chat",
     "GH_PAGER": ""
   },
   "runArgs": [
