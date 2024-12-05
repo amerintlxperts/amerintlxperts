@@ -318,20 +318,30 @@ update_AZURE_TFSTATE_RESOURCES() {
   fi
 
   # Define tags
-  TAGS="Username=$OWNER_EMAIL Name='$NAME'"
+  TAGS=(
+  "Username=${OWNER_EMAIL}"
+  "FullName=${NAME}"
+)
+TAGS_STRING=""
+for TAG in "${TAGS[@]}"; do
+  KEY="${TAG%%=*}"
+  VALUE="${TAG#*=}"
+  TAGS_STRING+="\"${KEY}\"=\"${VALUE}\" "
+done
+TAGS_STRING=$(echo "${TAGS_STRING}" | sed 's/ *$//')
 
   # Check if resource group exists
-  if ! az group show -n "${PROJECT_NAME}-tfstate" &>/dev/null; then
-    az group create -n "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --tags $TAGS
-  else
-    az group update -n "${PROJECT_NAME}-tfstate" --set tags."Username"="$OWNER_EMAIL" tags."FullName"="$NAME"
-  fi
+if ! az group show -n "${PROJECT_NAME}-tfstate" &>/dev/null; then
+  az group create -n "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --tags ${TAGS_STRING}
+else
+  az group update -n "${PROJECT_NAME}-tfstate" --set $(echo "${TAGS_STRING}" | sed 's/ / tags./g' | sed 's/^/tags./')
+fi
 
   # Check if storage account exists
   if ! az storage account show -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" &>/dev/null; then
-    az storage account create -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --sku Standard_LRS --tags $TAGS
+    az storage account create -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --sku Standard_LRS --tags ${TAGS_STRING}
   else
-    az storage account update -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" --set tags."Username"="$OWNER_EMAIL" tags."Name"="$NAME"
+    az storage account update -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" --set  $(echo "${TAGS_STRING}" | sed 's/ / tags./g' | sed 's/^/tags./')
   fi
 
   # Adding a delay to ensure resources are fully available
