@@ -1136,6 +1136,7 @@ destroy() {
 }
 
 create-azure-resources() {
+    update_GITHUB_AUTH_LOGIN
     update_AZ_AUTH_LOGIN
     update_OWNER_EMAIL
     update_AZURE_SUBSCRIPTION_SELECTION
