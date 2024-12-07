@@ -317,32 +317,28 @@ update_AZURE_TFSTATE_RESOURCES() {
     return 1
   fi
 
-  # Define tags
-  TAGS=(
-  "Username=${OWNER_EMAIL}"
-  "FullName=${NAME}"
-)
-TAGS_STRING=""
-for TAG in "${TAGS[@]}"; do
-  KEY="${TAG%%=*}"
-  VALUE="${TAG#*=}"
-  TAGS_STRING+="\"${KEY}\"=\"${VALUE}\" "
-done
-TAGS_STRING=$(echo "${TAGS_STRING}" | sed 's/ *$//')
+  # Replace spaces with underscores in tag values
+  OWNER_EMAIL_SANITIZED=${OWNER_EMAIL// /_}
+  NAME_SANITIZED=${NAME// /_}
+
+  # Define resource tags
+  TAGS="Username=${OWNER_EMAIL_SANITIZED} FullName=${NAME_SANITIZED}"
 
   # Check if resource group exists
-if ! az group show -n "${PROJECT_NAME}-tfstate" &>/dev/null; then
-  az group create -n "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --tags ${TAGS_STRING}
-else
-  az group update -n "${PROJECT_NAME}-tfstate" --set $(echo "${TAGS_STRING}" | sed 's/ / tags./g' | sed 's/^/tags./')
-fi
+  if ! az group show -n "${PROJECT_NAME}-tfstate" &>/dev/null; then
+    az group create -n "${PROJECT_NAME}-tfstate" -l "${LOCATION}"
+  fi
+
+  # Update tags for resource group
+  az tag update --resource-id "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${PROJECT_NAME}-tfstate" --operation merge --tags $TAGS
 
   # Check if storage account exists
   if ! az storage account show -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" &>/dev/null; then
-    az storage account create -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --sku Standard_LRS --tags ${TAGS_STRING}
-  else
-    az storage account update -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" --set  $(echo "${TAGS_STRING}" | sed 's/ / tags./g' | sed 's/^/tags./')
+    az storage account create -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --sku Standard_LRS
   fi
+
+  # Update tags for storage account
+  az tag update --resource-id "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${PROJECT_NAME}-tfstate/providers/Microsoft.Storage/storageAccounts/${AZURE_STORAGE_ACCOUNT_NAME}" --operation merge --tags $TAGS
 
   # Adding a delay to ensure resources are fully available
   sleep 10
@@ -354,7 +350,7 @@ fi
     if az storage container show -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" &>/dev/null; then
       break
     else
-      if az storage container create -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" --auth-mode login --metadata Username="$OWNER_EMAIL" Name="$NAME"; then
+      if az storage container create -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" --auth-mode login --metadata Username="$OWNER_EMAIL_SANITIZED" Name="$NAME_SANITIZED"; then
         break
       else
         sleep 5
