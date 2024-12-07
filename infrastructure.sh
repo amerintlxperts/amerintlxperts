@@ -117,7 +117,9 @@ update_GITHUB_AUTH_LOGIN() {
 }
 
 update_GITHUB_FORKS() {
-  local local_array=(${ALLREPOS[@]})
+  local repo_info
+  local parent
+  local local_array=( "${ALLREPOS[@]}" )
   local upstream_org="amerintlxperts"
   local repo_owner="$GITHUB_ORG"
   local max_retries=3  # Maximum number of retries
@@ -126,8 +128,8 @@ update_GITHUB_FORKS() {
   for repo_name in "${local_array[@]}"; do
     if gh repo view "${repo_owner}/$repo_name" &> /dev/null; then
       # Repository exists
-      local repo_info=$(gh repo view "$repo_owner/$repo_name" --json parent)
-      local parent=$(echo "$repo_info" | jq -r '.parent | if type == "object" then (.owner.login + "/" + .name) else "" end')
+      repo_info=$(gh repo view "$repo_owner/$repo_name" --json parent)
+      parent=$(echo "$repo_info" | jq -r '.parent | if type == "object" then (.owner.login + "/" + .name) else "" end')
 
       if [[ -n "$parent" ]]; then
         # Repository is a fork, sync it
@@ -995,7 +997,7 @@ update_MANIFESTS_PRIVATE_KEYS() {
   secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_INFRASTRUCTURE_REPO_NAME})
   normalized_repo=$(echo "${MANIFESTS_INFRASTRUCTURE_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
   for ((attempt=1; attempt<=max_retries; attempt++)); do
-    if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+    if gh secret set "${normalized_repo}_SSH_PRIVATE_KEY" -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
       RUN_INFRASTRUCTURE="true"
       break
     else
@@ -1012,7 +1014,7 @@ update_MANIFESTS_PRIVATE_KEYS() {
   secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_APPLICATIONS_REPO_NAME})
   normalized_repo=$(echo "${MANIFESTS_APPLICATIONS_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
   for ((attempt=1; attempt<=max_retries; attempt++)); do
-    if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+    if gh secret set "${normalized_repo}_SSH_PRIVATE_KEY" -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
       RUN_INFRASTRUCTURE="true"
       break
     else
