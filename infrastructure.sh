@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+# write a short explanation of this script in a comment block. AI!
+
 # Initialize INITJSON variable
 INITJSON="config.json"
 export GH_PAGER=""
