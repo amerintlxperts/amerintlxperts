@@ -117,6 +117,7 @@ update_GITHUB_AUTH_LOGIN() {
       exit 1
     }
   fi
+  gh auth setup-git
 }
 
 update_GITHUB_FORKS() {
