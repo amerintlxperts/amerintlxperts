@@ -110,6 +110,7 @@ prompt_github_username() {
 }
 
 update_GITHUB_AUTH_LOGIN() {
+  export GITHUB_TOKEN=
   if ! gh auth status &>/dev/null; then
     gh auth login || {
       echo "GitHub login failed. Exiting."
