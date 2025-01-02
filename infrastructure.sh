@@ -241,22 +241,22 @@ update_AZ_AUTH_LOGIN() {
 }
 
 update_OWNER_EMAIL() {
-    
-  local max_retries=3                                                                                                                                         
-  local retry_interval=5                                                                                                                                      
-  for ((attempt=1; attempt<=max_retries; attempt++)); do                                                                                                      
-    if gh secret set OWNER_EMAIL -b "$OWNER_EMAIL" --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}"; then                                               
-      RUN_INFRASTRUCTURE="true"                                                                                                                               
-      break                                                                                                                                                   
-    else                                                                                                                                                      
-      if [[ $attempt -lt $max_retries ]]; then                                                                                                                
-        echo "Warning: Failed to set GitHub secret OWNER_EMAIL. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."                        
-        sleep $retry_interval                                                                                                                                 
-      else                                                                                                                                                    
-        echo "Error: Failed to set GitHub secret OWNER_EMAIL:$ after $max_retries attempts. Exiting."                                                              
-        exit 1                                                                                                                                                
-      fi                                                                                                                                                      
-    fi                                                                                                                                                        
+
+  local max_retries=3
+  local retry_interval=5
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    if gh secret set OWNER_EMAIL -b "$OWNER_EMAIL" --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}"; then
+      RUN_INFRASTRUCTURE="true"
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to set GitHub secret OWNER_EMAIL. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to set GitHub secret OWNER_EMAIL:$ after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
   done
 }
 
@@ -920,7 +920,7 @@ update_INFRASTRUCTURE_BOOLEAN_VARIABLES() {
   local attempts
   local max_attempts=3
   local retry_interval=5
-  declare -a app_list=("DEPLOYED" "MANAGEMENT_PUBLIC_IP" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL" "PRODUCTION_ENVIRONMENT")
+  declare -a app_list=("DEPLOYED" "MANAGEMENT_PUBLIC_IP" "APPLICATION_SIGNUP" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL" "PRODUCTION_ENVIRONMENT")
 
   for var_name in "${app_list[@]}"; do
     # Fetch current variable value
