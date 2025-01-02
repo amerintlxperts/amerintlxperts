@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+# write a short explanation of this script in a comment block. AI!
+
 # Initialize INITJSON variable
 INITJSON="config.json"
 export GH_PAGER=""
@@ -15,7 +17,6 @@ fi
 
 DEPLOYED=$(jq -r '.DEPLOYED' "$INITJSON")
 PROJECT_NAME=$(jq -r '.PROJECT_NAME' "$INITJSON")
-DOCS_USERNAME=$(jq -r '.PROJECT_NAME' "$INITJSON")
 LOCATION=$(jq -r '.LOCATION' "$INITJSON")
 THEME_REPO_NAME=$(jq -r '.THEME_REPO_NAME' "$INITJSON")
 LANDING_PAGE_REPO_NAME=$(jq -r '.LANDING_PAGE_REPO_NAME' "$INITJSON")
@@ -71,6 +72,8 @@ if [ "$GITHUB_ORG" != "$PROJECT_NAME" ]; then
 else
   LETSENCRYPT_URL='https://acme-v02.api.letsencrypt.org/directory'
 fi
+DOCS_FQDN="docs.${DNS_ZONE}"
+OLLAMA_FQDN="ollama.${DNS_ZONE}"
 
 AZURE_STORAGE_ACCOUNT_NAME=$(echo "{$PROJECT_NAME}account" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z' | cut -c 1-24)
 if [[ "$MKDOCS_REPO_NAME" != */* ]]; then
@@ -86,7 +89,8 @@ if [[ -z "$GITHUB_ORG" ]]; then
 fi
 
 get_github_username() {
-    local output=$(gh auth status 2>/dev/null)
+    local output
+    output=$(gh auth status 2>/dev/null)
     if [[ $? -ne 0 ]]; then
         echo "Error retrieving GitHub status."
         return 1
@@ -95,7 +99,8 @@ get_github_username() {
 }
 
 prompt_github_username() {
-    local default_user=$(get_github_username)
+    local default_user
+    default_user=$(get_github_username)
     read -e -p "Enter your personal GitHub account name [${default_user:-no user found}]: " USER
     USER="${USER:-$default_user}"
     if [[ -z "$USER" ]]; then
@@ -105,16 +110,20 @@ prompt_github_username() {
 }
 
 update_GITHUB_AUTH_LOGIN() {
+  export GITHUB_TOKEN=
   if ! gh auth status &>/dev/null; then
     gh auth login || {
       echo "GitHub login failed. Exiting."
       exit 1
     }
   fi
+  gh auth setup-git
 }
 
 update_GITHUB_FORKS() {
-  local local_array=(${ALLREPOS[@]})
+  local repo_info
+  local parent
+  local local_array=( "${ALLREPOS[@]}" )
   local upstream_org="amerintlxperts"
   local repo_owner="$GITHUB_ORG"
   local max_retries=3  # Maximum number of retries
@@ -123,8 +132,8 @@ update_GITHUB_FORKS() {
   for repo_name in "${local_array[@]}"; do
     if gh repo view "${repo_owner}/$repo_name" &> /dev/null; then
       # Repository exists
-      local repo_info=$(gh repo view "$repo_owner/$repo_name" --json parent)
-      local parent=$(echo "$repo_info" | jq -r '.parent | if type == "object" then (.owner.login + "/" + .name) else "" end')
+      repo_info=$(gh repo view "$repo_owner/$repo_name" --json parent)
+      parent=$(echo "$repo_info" | jq -r '.parent | if type == "object" then (.owner.login + "/" + .name) else "" end')
 
       if [[ -n "$parent" ]]; then
         # Repository is a fork, sync it
@@ -232,22 +241,22 @@ update_AZ_AUTH_LOGIN() {
 }
 
 update_OWNER_EMAIL() {
-    
-  local max_retries=3                                                                                                                                         
-  local retry_interval=5                                                                                                                                      
-  for ((attempt=1; attempt<=max_retries; attempt++)); do                                                                                                      
-    if gh secret set OWNER_EMAIL -b "$OWNER_EMAIL" --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}"; then                                               
-      RUN_INFRASTRUCTURE="true"                                                                                                                               
-      break                                                                                                                                                   
-    else                                                                                                                                                      
-      if [[ $attempt -lt $max_retries ]]; then                                                                                                                
-        echo "Warning: Failed to set GitHub secret OWNER_EMAIL. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."                        
-        sleep $retry_interval                                                                                                                                 
-      else                                                                                                                                                    
-        echo "Error: Failed to set GitHub secret OWNER_EMAIL:$ after $max_retries attempts. Exiting."                                                              
-        exit 1                                                                                                                                                
-      fi                                                                                                                                                      
-    fi                                                                                                                                                        
+
+  local max_retries=3
+  local retry_interval=5
+  for ((attempt=1; attempt<=max_retries; attempt++)); do
+    if gh secret set OWNER_EMAIL -b "$OWNER_EMAIL" --repo "${GITHUB_ORG}/${INFRASTRUCTURE_REPO_NAME}"; then
+      RUN_INFRASTRUCTURE="true"
+      break
+    else
+      if [[ $attempt -lt $max_retries ]]; then
+        echo "Warning: Failed to set GitHub secret OWNER_EMAIL. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+        sleep $retry_interval
+      else
+        echo "Error: Failed to set GitHub secret OWNER_EMAIL:$ after $max_retries attempts. Exiting."
+        exit 1
+      fi
+    fi
   done
 }
 
@@ -314,22 +323,28 @@ update_AZURE_TFSTATE_RESOURCES() {
     return 1
   fi
 
-  # Define tags
-  TAGS="Username=$OWNER_EMAIL Name='$NAME'"
+  # Replace spaces with underscores in tag values
+  OWNER_EMAIL_SANITIZED=${OWNER_EMAIL// /_}
+  NAME_SANITIZED=${NAME// /_}
+
+  # Define resource tags
+  TAGS="Username=${OWNER_EMAIL_SANITIZED} FullName=${NAME_SANITIZED}"
 
   # Check if resource group exists
   if ! az group show -n "${PROJECT_NAME}-tfstate" &>/dev/null; then
-    az group create -n "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --tags $TAGS
-  else
-    az group update -n "${PROJECT_NAME}-tfstate" --set tags."Username"="$OWNER_EMAIL" tags."FullName"="$NAME"
+    az group create -n "${PROJECT_NAME}-tfstate" -l "${LOCATION}"
   fi
+
+  # Update tags for resource group
+  az tag update --resource-id "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${PROJECT_NAME}-tfstate" --operation merge --tags $TAGS
 
   # Check if storage account exists
   if ! az storage account show -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" &>/dev/null; then
-    az storage account create -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --sku Standard_LRS --tags $TAGS
-  else
-    az storage account update -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" --set tags."Username"="$OWNER_EMAIL" tags."Name"="$NAME"
+    az storage account create -n "${AZURE_STORAGE_ACCOUNT_NAME}" -g "${PROJECT_NAME}-tfstate" -l "${LOCATION}" --sku Standard_LRS
   fi
+
+  # Update tags for storage account
+  az tag update --resource-id "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${PROJECT_NAME}-tfstate/providers/Microsoft.Storage/storageAccounts/${AZURE_STORAGE_ACCOUNT_NAME}" --operation merge --tags $TAGS
 
   # Adding a delay to ensure resources are fully available
   sleep 10
@@ -341,7 +356,7 @@ update_AZURE_TFSTATE_RESOURCES() {
     if az storage container show -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" &>/dev/null; then
       break
     else
-      if az storage container create -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" --auth-mode login --metadata Username="$OWNER_EMAIL" Name="$NAME"; then
+      if az storage container create -n "${PROJECT_NAME}tfstate" --account-name "${AZURE_STORAGE_ACCOUNT_NAME}" --auth-mode login --metadata Username="$OWNER_EMAIL_SANITIZED" Name="$NAME_SANITIZED"; then
         break
       else
         sleep 5
@@ -486,6 +501,28 @@ update_PAT() {
   fi
 }
 
+update_MANIFESTS_APPLICATIONS_VARIABLES() {
+    for variable in \
+      "OLLAMA_FQDN:$OLLAMA_FQDN" \
+      "DOCS_FQDN:$DOCS_FQDN" ; do
+      key="${variable%%:*}"
+      value="${variable#*:}"
+      for ((attempt=1; attempt<=max_retries; attempt++)); do
+        if gh variable set "$key" -b "$value" --repo ${GITHUB_ORG}/$MANIFESTS_APPLICATIONS_REPO_NAME; then
+          break
+        else
+          if [[ $attempt -lt $max_retries ]]; then
+            echo "Warning: Failed to set GitHub variable $key. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
+            sleep $retry_interval
+          else
+            echo "Error: Failed to set GitHub variable $key after $max_retries attempts. Exiting."
+            exit 1
+          fi
+        fi
+      done
+    done
+}
+
 update_CONTENT_REPOS_VARIABLES() {
   for repo in "${CONTENTREPOS[@]}"; do
     for variable in \
@@ -606,7 +643,8 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
   local tpl_file="${current_dir}/docs-builder.tpl"
   local github_token="$PAT"
   local output_file=".github/workflows/docs-builder.yml"
-  local theme_secret_key_name="$(echo "$THEME_REPO_NAME" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
+  local theme_secret_key_name
+  theme_secret_key_name="$(echo "$THEME_REPO_NAME" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
 
   # Use a trap to ensure that temporary directories are cleaned up safely
   TEMP_DIR=$(mktemp -d)
@@ -628,7 +666,8 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
 
   # Start building the clone repo commands string
   local clone_commands=""
-  local landing_page_secret_key_name="$(echo "${LANDING_PAGE_REPO_NAME}" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
+  local landing_page_secret_key_name
+  landing_page_secret_key_name="$(echo "${LANDING_PAGE_REPO_NAME}" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
   clone_commands+="      - name: Clone Landing Page\n"
   clone_commands+="        shell: bash\n"
   clone_commands+="        run: |\n"
@@ -643,7 +682,8 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
   clone_commands+="          echo 'site_name: \"Hands on Labs\"' > \$TEMP_DIR/landing-page/mkdocs.yml\n"
   clone_commands+="          echo 'INHERIT: docs/theme/mkdocs.yml' > \$TEMP_DIR/landing-page/mkdocs.yml\n\n"
 
-  local theme_secret_key_name="$(echo "${THEME_REPO_NAME}" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
+  local theme_secret_key_name
+  theme_secret_key_name="$(echo "${THEME_REPO_NAME}" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
   clone_commands+="      - name: Clone Theme\n"
   clone_commands+="        shell: bash\n"
   clone_commands+="        run: |\n"
@@ -657,9 +697,9 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
   clone_commands+="      - name: Clone Content Repos\n"
   clone_commands+="        shell: bash\n"
   clone_commands+="        run: |\n"
-
+  local secret_key_name
   for repo in "${CONTENTREPOSONLY[@]}"; do
-    local secret_key_name="$(echo "$repo" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
+    secret_key_name="$(echo "$repo" | tr '[:lower:]-' '[:upper:]_')_SSH_PRIVATE_KEY"
     clone_commands+="          mkdir -p \$TEMP_DIR/src/${repo}\n"
     clone_commands+="          if [ -f ~/.ssh/id_ed25519 ]; then chmod 600 ~/.ssh/id_ed25519; fi\n"
     clone_commands+="          echo '\${{ secrets.${secret_key_name} }}' > ~/.ssh/id_ed25519 && chmod 400 ~/.ssh/id_ed25519\n"
@@ -880,7 +920,7 @@ update_INFRASTRUCTURE_BOOLEAN_VARIABLES() {
   local attempts
   local max_attempts=3
   local retry_interval=5
-  declare -a app_list=("DEPLOYED" "MANAGEMENT_PUBLIC_IP" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL" "PRODUCTION_ENVIRONMENT")
+  declare -a app_list=("DEPLOYED" "MANAGEMENT_PUBLIC_IP" "APPLICATION_SIGNUP" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL" "PRODUCTION_ENVIRONMENT")
 
   for var_name in "${app_list[@]}"; do
     # Fetch current variable value
@@ -928,7 +968,6 @@ update_INFRASTRUCTURE_BOOLEAN_VARIABLES() {
   done
 }
 
-
 update_INFRASTRUCTURE_VARIABLES() {
   for variable in \
     "PROJECT_NAME:${PROJECT_NAME}" \
@@ -962,7 +1001,7 @@ update_MANIFESTS_PRIVATE_KEYS() {
   secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_INFRASTRUCTURE_REPO_NAME})
   normalized_repo=$(echo "${MANIFESTS_INFRASTRUCTURE_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
   for ((attempt=1; attempt<=max_retries; attempt++)); do
-    if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+    if gh secret set "${normalized_repo}_SSH_PRIVATE_KEY" -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
       RUN_INFRASTRUCTURE="true"
       break
     else
@@ -979,7 +1018,7 @@ update_MANIFESTS_PRIVATE_KEYS() {
   secret_key=$(cat $HOME/.ssh/id_ed25519-${MANIFESTS_APPLICATIONS_REPO_NAME})
   normalized_repo=$(echo "${MANIFESTS_APPLICATIONS_REPO_NAME}" | tr '-' '_' | tr '[:lower:]' '[:upper:]')
   for ((attempt=1; attempt<=max_retries; attempt++)); do
-    if gh secret set ${normalized_repo}_SSH_PRIVATE_KEY -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
+    if gh secret set "${normalized_repo}_SSH_PRIVATE_KEY" -b "$secret_key" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
       RUN_INFRASTRUCTURE="true"
       break
     else
@@ -1085,6 +1124,7 @@ initialize() {
   update_HTPASSWD
   update_INFRASTRUCTURE_VARIABLES
   update_MANIFESTS_PRIVATE_KEYS
+  update_MANIFESTS_APPLICATIONS_VARIABLES
 }
 
 hub_password(){
@@ -1098,6 +1138,7 @@ destroy() {
 }
 
 create-azure-resources() {
+    update_GITHUB_AUTH_LOGIN
     update_AZ_AUTH_LOGIN
     update_OWNER_EMAIL
     update_AZURE_SUBSCRIPTION_SELECTION
