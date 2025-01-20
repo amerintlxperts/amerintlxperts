@@ -619,6 +619,7 @@ update_DOCS_BUILDER_VARIABLES() {
   # Update variables using a loop
   for variable in \
     "MKDOCS_REPO_NAME:$MKDOCS_REPO_NAME" \
+    "DNS_ZONE:${DNS_ZONE}" \
     "MANIFESTS_APPLICATIONS_REPO_NAME:$MANIFESTS_APPLICATIONS_REPO_NAME" ; do
 
     key="${variable%%:*}"
