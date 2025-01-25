@@ -916,13 +916,76 @@ update_MANAGEMENT_PUBLIC_IP() {
   done
 }
 
+update_PRODUCTION_ENVIRONMENT_VARIABLES() {
+  local current_value
+  local new_value=""
+  local attempts
+  local max_attempts=3
+  local retry_interval=5
+  current_value=$(gh variable list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME --json name,value | jq -r ".[] | select(.name == \"PRODUCTION_ENVIRONMENT\") | .value")
+
+  if [ -z "$current_value" ]; then
+    # Variable does not exist, prompt user to create it
+    read -p "Set initial PRODUCTION_ENVIRONMENT value ('true' or 'false') (default: false)? " new_value
+    new_value=${new_value:-false}
+  else
+    # Variable exists, display the current value and prompt user for change
+    read -p "Change current value of \"PRODUCTION_ENVIRONMENT=$current_value\": (N/y)? " change_choice
+    change_choice=${change_choice:-N}
+    if [[ "$change_choice" =~ ^[Yy]$ ]]; then
+      if [[ "$current_value" == "true" ]]; then
+        new_value="false"
+      else
+        new_value="true"
+      fi
+    fi
+  fi
+
+  # If there's a new value to be set, attempt to update the variable
+  if [[ -n "$new_value" ]]; then
+    attempts=0
+    while (( attempts < max_attempts )); do
+      if gh variable set "PRODUCTION_ENVIRONMENT" --body "$new_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME &&  gh variable set "PRODUCTION_ENVIRONMENT" --body "$new_value" --repo ${GITHUB_ORG}/$MANIFESTS_APPLICATIONS_REPO_NAME ; then
+        echo "Successfully updated PRODUCTION_ENVIRONMENT to $new_value"
+        RUN_INFRASTRUCTURE="true"
+        break
+      else
+        ((attempts++))
+        if (( attempts < max_attempts )); then
+          echo "Warning: Failed to update variable \"PRODUCTION_ENVIRONMENT\". Retrying in $retry_interval seconds... (Attempt $attempts of $max_attempts)"
+          sleep $retry_interval
+        else
+          echo "Error: Failed to update variable \"PRODUCTION_ENVIRONMENT\" after $max_attempts attempts."
+        fi
+      fi
+    done
+  else
+    attempts=0
+    while (( attempts < max_attempts )); do
+      if gh variable set "PRODUCTION_ENVIRONMENT" --body "$current_value" --repo ${GITHUB_ORG}/$MANIFESTS_APPLICATIONS_REPO_NAME ; then
+        echo "Successfully updated PRODUCTION_ENVIRONMENT to $current_value"
+        break
+      else
+        ((attempts++))
+        if (( attempts < max_attempts )); then
+          echo "Warning: Failed to update variable \"PRODUCTION_ENVIRONMENT\". Retrying in $retry_interval seconds... (Attempt $attempts of $max_attempts)"
+          sleep $retry_interval
+        else
+          echo "Error: Failed to update variable \"PRODUCTION_ENVIRONMENT\" after $max_attempts attempts."
+        fi
+      fi
+    done
+  fi
+
+}
+
 update_INFRASTRUCTURE_BOOLEAN_VARIABLES() {
   local current_value
   local new_value=""
   local attempts
   local max_attempts=3
   local retry_interval=5
-  declare -a app_list=("DEPLOYED" "MANAGEMENT_PUBLIC_IP" "APPLICATION_SIGNUP" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL" "PRODUCTION_ENVIRONMENT")
+  declare -a app_list=("DEPLOYED" "MANAGEMENT_PUBLIC_IP" "APPLICATION_SIGNUP" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL")
 
   for var_name in "${app_list[@]}"; do
     # Fetch current variable value
@@ -1121,6 +1184,7 @@ initialize() {
   #copy_docs-builder-workflow_to_docs-builder_repo
   #copy_dispatch-workflow_to_content_repos
   update_INFRASTRUCTURE_BOOLEAN_VARIABLES
+  update_PRODUCTION_ENVIRONMENT_VARIABLES
   update_LW_AGENT_TOKEN
   update_HUB_NVA_CREDENTIALS
   update_HTPASSWD
