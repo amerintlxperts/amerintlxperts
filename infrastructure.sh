@@ -75,6 +75,7 @@ else
 fi
 DOCS_FQDN="docs.${DNS_ZONE}"
 OLLAMA_FQDN="ollama.${DNS_ZONE}"
+ARTIFACTS_FQDN="artifacts.${DNS_ZONE}"
 
 AZURE_STORAGE_ACCOUNT_NAME=$(echo "{$PROJECT_NAME}account" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z' | cut -c 1-24)
 if [[ "$MKDOCS_REPO_NAME" != */* ]]; then
@@ -505,6 +506,7 @@ update_PAT() {
 update_MANIFESTS_APPLICATIONS_VARIABLES() {
     for variable in \
       "OLLAMA_FQDN:$OLLAMA_FQDN" \
+      "ARTIFACTS_FQDN:$ARTIFACTS_FQDN" \
       "DOCS_FQDN:$DOCS_FQDN" ; do
       key="${variable%%:*}"
       value="${variable#*:}"
@@ -732,13 +734,13 @@ copy_docs-builder-workflow_to_docs-builder_repo() {
 
 update_LW_AGENT_TOKEN() {
     if gh secret list --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME | grep -q '^LW_AGENT_TOKEN\s'; then
-        read -rp "Change the Laceworks token ? (N/y): " response
+        read -rp "Change the FortiCNAPP token ? (N/y): " response
         response=${response:-N}
         if [[ "$response" =~ ^[Yy]$ ]]; then
-            read -srp "Enter new value for Laceworks token: " new_LW_AGENT_TOKEN_value
+            read -srp "Enter new value for FortiCNAPP token: " new_LW_AGENT_TOKEN_value
             echo
             if gh secret set LW_AGENT_TOKEN -b "$new_LW_AGENT_TOKEN_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-              echo "Updated Laceworks token"
+              echo "Updated FortiCNAPP token"
             else
               if [[ $attempt -lt $max_retries ]]; then
                 echo "Warning: Failed to set GitHub secret LW_AGENT_TOKEN. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
@@ -750,10 +752,10 @@ update_LW_AGENT_TOKEN() {
             fi
         fi
     else
-        read -srp "Enter value for Laceworks token: " new_LW_AGENT_TOKEN_value
+        read -srp "Enter value for FortiCNAPP token: " new_LW_AGENT_TOKEN_value
         echo
         if gh secret set LW_AGENT_TOKEN -b "$new_LW_AGENT_TOKEN_value" --repo ${GITHUB_ORG}/$INFRASTRUCTURE_REPO_NAME; then
-          echo "Updated Laceworks Token"
+          echo "Updated FortiCNAPP Token"
         else
           if [[ $attempt -lt $max_retries ]]; then
             echo "Warning: Failed to set GitHub secret LW_AGENT_TOKEN. Attempt $attempt of $max_retries. Retrying in $retry_interval seconds..."
@@ -985,7 +987,7 @@ update_INFRASTRUCTURE_BOOLEAN_VARIABLES() {
   local attempts
   local max_attempts=3
   local retry_interval=5
-  declare -a app_list=("DEPLOYED" "MANAGEMENT_PUBLIC_IP" "APPLICATION_SIGNUP" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "GPU_NODE_POOL")
+  declare -a app_list=("DEPLOYED" "MANAGEMENT_PUBLIC_IP" "APPLICATION_SIGNUP" "APPLICATION_DOCS" "APPLICATION_VIDEO" "APPLICATION_DVWA" "APPLICATION_OLLAMA" "APPLICATION_ARTIFACTS" "APPLICATION_EXTRACTOR" "GPU_NODE_POOL")
 
   for var_name in "${app_list[@]}"; do
     # Fetch current variable value
